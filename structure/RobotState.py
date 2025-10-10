@@ -1,5 +1,4 @@
 from Debug import Debug
-from transmission.ComsThread import ComsThread
 
 class RobotState:
     _instance = None
@@ -51,39 +50,27 @@ class RobotState:
     
     def enable_teleop(self):
         # prevent enabling teleop if not connected to pi, disable if debugging
-        if not Debug.ignoreComsToEnable and not ComsThread().connected:
-            print("Cannot enable teleop, not connected to pi")
-            return False
 
         if self._enabled:
             print("Cannot enable test, robot is already enabled")
             return False
         
-        ComsThread().set_enabled(True)
         self._enabled = True
         self._teleop_enabled = True
         self._teleop_to_be_initialized = True
         return True
     
     def enable_test(self):
-        # prevent enabling test if not connected to pi, disable if debugging
-        if not Debug.ignoreComsToEnable and not ComsThread().connected:
-            print("Cannot enable test, not connected to pi")
-            return False
-
         if self._enabled:
             print("Cannot enable test, robot is already enabled")
             return False
         
-        ComsThread().set_enabled(True)
         self._enabled = True
         self._test_enabled = True
         self._test_to_be_initialized = True
         return True
     
     def disable_robot(self):
-        ComsThread().set_enabled(False)
-        
         self._enabled = False
         self._teleop_enabled = False
         self._test_enabled = False

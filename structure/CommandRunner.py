@@ -62,6 +62,7 @@ class CommandRunner:
         # Display a list of commands currently in the loop
         if Debug.displayActiveCommands:
             command_names = [command.__class__.__name__ for command in self.commands]
+            print(f"Active Commands: {', '.join(command_names)}")
 
         self.in_run_loop = False
         
