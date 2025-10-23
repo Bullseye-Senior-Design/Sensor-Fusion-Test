@@ -1,3 +1,4 @@
 pynput
 numpy
 scipy
+pyserial==3.5
