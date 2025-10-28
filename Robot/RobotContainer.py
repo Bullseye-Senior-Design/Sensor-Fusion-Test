@@ -5,11 +5,14 @@ from structure.Input.KeyboardListener import KeyboardListener
 from structure.commands.InstantCommand import InstantCommand
 from structure.commands.SequentialCommandGroup import SequentialCommandGroup
 from subsystems.sensors.UWB import UWB
+from subsystems.sensors.IMU import IMU
+from Commands.LogDataCmd import LogDataCmd
 
 class RobotContainer:
     def __init__(self):
         self.uwb = UWB()
-        self.uwb.start(ports=['/dev/ttyUSB0'])
+        self.imu = IMU()
+        self.uwb.start(ports=['/dev/ttyACM0'])
                     
     def teleop_init(self):
-        pass
+        LogDataCmd().schedule()

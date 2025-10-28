@@ -13,7 +13,6 @@ class UWB:
 
     Usage:
       - Pass a list of serial port names: UWB(['COM3','COM4'])
-      - Or pass an integer N (Windows): UWB(2) will create COM1 and COM2
 
     The constructor will create the requested `UWBTag` instances and, by default,
     attempt to connect and start continuous reading on each.
