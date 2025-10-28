@@ -13,6 +13,9 @@ from __future__ import annotations
 import numpy as np
 from scipy.linalg import block_diag
 import threading
+from dataclasses import dataclass
+from typing import Tuple
+
 
 GRAVITY = np.array([0.0, 0.0, -9.80665])
 
@@ -79,6 +82,11 @@ def quat_to_euler(q: np.ndarray) -> np.ndarray:
 
     return np.array([roll, pitch, yaw])
 
+@dataclass
+class State:
+    pos: Tuple[float, float, float]      # shape (3,)
+    vel: Tuple[float, float, float]      # shape (3,)
+    quat: Tuple[float, float, float, float]  # shape (4,)
 
 class KalmanStateEstimator:
     _instance = None
@@ -114,7 +122,6 @@ class KalmanStateEstimator:
         self.P[0:3, 0:3] = P_pos
         self.P[3:6, 3:6] = P_vel
         self.P[6:9, 6:9] = P_quat
-        
         # bias covariances
         self.P[9:12, 9:12] = P_ba
         self.P[12:15, 12:15] = P_bg
@@ -129,7 +136,7 @@ class KalmanStateEstimator:
 
         # Measurement noise templates
         self.R_uwb_range = 0.1 ** 2  # 10 cm sigma default
-        self.R_mag = np.eye(3) * (0.05 ** 2)
+        self.R_mag = np.eye(3) * (0.3 ** 2) / 12  # 1 µT std (adjust up/down)
 
     # --- Helpers to access parts of the full state
     @property
@@ -162,6 +169,14 @@ class KalmanStateEstimator:
     def bg(self) -> np.ndarray:
         with self._lock:
             return self.x[13:16].copy()
+    
+    def get_state(self) -> State:
+        with self._lock:
+            return State(
+                pos=tuple(self.x[0:3]),
+                vel=tuple(self.x[3:6]),
+                quat=tuple(self.x[6:10]),
+            )
 
     def predict(self, accel_meas: np.ndarray, gyro_meas: np.ndarray):
         """Predict step using IMU measurements (body frame accel and angular rate).

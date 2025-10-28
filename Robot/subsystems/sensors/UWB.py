@@ -1,5 +1,5 @@
-from typing import List, Union, Tuple, Optional, Any
-from .UWBTag import UWBTag
+from typing import List, Tuple
+from .UWBTag import UWBTag, Position
 import logging
 import threading
 import time
@@ -37,15 +37,25 @@ class UWB:
         start_immediately: bool = True,
     ):
         port_list = list(ports)
+        self.interval = interval
 
         # Use Any here so static checkers don't require resolving UWBTag symbols
-        self.tags: List[Any] = []
+        self.tags: List[UWBTag] = []
         for p in port_list:
             tag = UWBTag(port=p, baudrate=baudrate, timeout=timeout)
             self.tags.append(tag)
 
         if start_immediately:
             self.bootup()
+    
+    def get_positions(self) -> List[Position]:
+        """Get latest position from all connected tags."""
+        positions: List[Position] = []
+        for tag in self.tags:
+            pos = tag.get_latest_position()
+            if pos is not None:
+                positions.append(pos)
+        return positions
 
     def connect_all(self) -> List[Tuple[str, bool]]:
         """Attempt to connect all tags. Returns list of (port, success)."""
@@ -82,7 +92,7 @@ class UWB:
                         else:
                             ok = True
                         if ok:
-                            tag.start_continuous_reading()
+                            tag.start_continuous_reading(self.interval)
                             break
                     except Exception:
                         logger.exception(f"Boot: error starting {tag.port}")

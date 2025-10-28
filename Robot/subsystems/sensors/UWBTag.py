@@ -69,6 +69,8 @@ class UWBTag:
         self.read_thread = None
         self.state_estimator = KalmanStateEstimator()
         
+        self.position_lock = threading.RLock()
+        
     def connect(self) -> bool:
         """
         Establish serial connection to DWM1001-DEV tag
@@ -289,7 +291,7 @@ class UWBTag:
             logger.error(f"Error getting node info: {e}")
             return {}
     
-    def start_continuous_reading(self, interval: float = 0.1):
+    def start_continuous_reading(self, interval: float = 0.1, debug: bool = False):
         """
         Start continuous position reading in a separate thread
         
@@ -317,11 +319,14 @@ class UWBTag:
                 # store anchors if provided
                 if anchors:
                     self.tag_info.anchors = anchors
-                    self.print_anchor_info()
+                    if debug:   
+                        self.print_anchor_info()
 
                 if position:
-                    self.tag_info.position = position
-                    self.print_position(position)
+                    with self.position_lock:
+                        self.tag_info.position = position
+                    if debug:
+                        self.print_position(position)
                 
                 time.sleep(interval) # TODO check if needed
         
@@ -337,6 +342,11 @@ class UWBTag:
         if self.read_thread and self.read_thread.is_alive():
             self.read_thread.join()
         logger.info("Stopped continuous position reading")
+    
+    def get_latest_position(self) -> Optional[Position]:
+        """Get the latest position reading"""
+        with self.position_lock:
+            return self.tag_info.position
         
     def print_anchor_info(self):
         """Print current anchor information"""
@@ -357,5 +367,5 @@ class UWBTag:
         Args:
             position: Position object with current location data
         """
-        print(f"Position: X={position.x:.3f}m, Y={position.y:.3f}m, Z={position.z:.3f}m, "
+        logger.info(f"Position: X={position.x:.3f}m, Y={position.y:.3f}m, Z={position.z:.3f}m, "
             f"Quality={position.quality}, Time={position.timestamp:.2f}")
