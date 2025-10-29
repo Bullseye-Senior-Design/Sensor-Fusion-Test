@@ -197,25 +197,52 @@ class IMU():
         while True:
             accel = None
             gyro = None
-            if all(v is not None for v in (self.sensor.acceleration, self.sensor.gyro)):
-                accel = getattr(self.sensor, 'acceleration', None)
-                gyro = getattr(self.sensor, 'gyro', None)
             magnetic = None
-            # only poll magnetic sensor at lower rate
-            if self.mag_interval_elapsed() and all (v is not None for v in (self.sensor.magnetic)):
-                magnetic = getattr(self.sensor, 'magnetic', None)
             quat = None
-            if all(v is not None for v in (self.sensor.quaternion)):
-                quat = getattr(self.sensor, 'quaternion', None)
-            
+
+            # Read sensor attributes defensively: catching Remote I/O (or other) errors
+            try:
+                accel_val = self.sensor.acceleration
+            except Exception:
+                accel_val = None
+            try:
+                gyro_val = self.sensor.gyro
+            except Exception:
+                gyro_val = None
+            try:
+                mag_val = self.sensor.magnetic
+            except Exception:
+                mag_val = None
+            try:
+                quat_val = self.sensor.quaternion
+            except Exception:
+                quat_val = None
+
+            # Use the pre-read values if available
+            if accel_val is not None and gyro_val is not None:
+                accel = accel_val
+                gyro = gyro_val
+            # only poll magnetic sensor at lower rate
+            if self.mag_interval_elapsed() and mag_val is not None:
+                magnetic = mag_val
+            if quat_val is not None:
+                quat = quat_val
+
             if accel is not None and gyro is not None:
-                accel_arr = np.asarray(accel, dtype=float)
-                gyro_arr = np.asarray(gyro, dtype=float)
-                self.state_estimator.predict(accel_meas=accel_arr, gyro_meas=gyro_arr)
+                try:
+                    accel_arr = np.asarray(accel, dtype=float)
+                    gyro_arr = np.asarray(gyro, dtype=float)
+                    self.state_estimator.predict(accel_meas=accel_arr, gyro_meas=gyro_arr)
+                except Exception:
+                    # ignore estimator errors to keep loop running
+                    pass
             if magnetic is not None:
-                mag_arr = np.asarray(magnetic, dtype=float)
-                mag_ref_world = np.array([0.0, 0.0, 1.0])
-                self.state_estimator.update_mag(mag_arr, mag_ref_world)
+                try:
+                    mag_arr = np.asarray(magnetic, dtype=float)
+                    mag_ref_world = np.array([0.0, 0.0, 1.0])
+                    self.state_estimator.update_mag(mag_arr, mag_ref_world)
+                except Exception:
+                    pass
 
             with self._lock:
                 if accel is not None:
@@ -224,7 +251,10 @@ class IMU():
                     except Exception:
                         pass
                 if gyro is not None:
-                    self.gyro = tuple(gyro)
+                    try:
+                        self.gyro = tuple(gyro)
+                    except Exception:
+                        pass
                 if magnetic is not None:
                     try:
                         self.magnetic = tuple(magnetic)
@@ -237,7 +267,7 @@ class IMU():
                         self.quat = tuple(quat)
                     except Exception:
                         pass
-                    
+
             # avoid busy loop
             time.sleep(self.interval)
              
