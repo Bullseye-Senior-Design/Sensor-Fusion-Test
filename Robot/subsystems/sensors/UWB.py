@@ -30,6 +30,7 @@ class UWB:
     def start(
         self,
         ports: List[str],
+        anchors_pos: List[Tuple[int, float, float, float]] | None,
         baudrate: int = 115200,
         timeout: float = 1.0,
         interval: float = 0.1,
@@ -37,11 +38,13 @@ class UWB:
     ):
         port_list = list(ports)
         self.interval = interval
+        
+        self.anchors_pos = anchors_pos
 
         # Use Any here so static checkers don't require resolving UWBTag symbols
         self.tags: List[UWBTag] = []
         for p in port_list:
-            tag = UWBTag(port=p, baudrate=baudrate, timeout=timeout)
+            tag = UWBTag(port=p, anchors_pos_override=anchors_pos, baudrate=baudrate, timeout=timeout)
             self.tags.append(tag)
 
         if start_immediately:
