@@ -205,6 +205,7 @@ class IMU():
             gyro_val = self.sensor.gyro
             mag_val = self.sensor.magnetic
             quat_val = self.sensor.quaternion
+            print(f"IMU Readings - Accel: {accel_val}, Gyro: {gyro_val}, Mag: {mag_val}, Quat: {quat_val}")
 
             # Use the pre-read values if available
             if all(v is not None for v in accel_val):
