@@ -141,7 +141,7 @@ class UWBTag:
                 anchors, position = self._parse_position(response)
                 return anchors, position
             else:
-                logger.warning(f"No position data in response: {response}")
+                # logger.warning(f"No position data in response: {response}")
                 return None, None
                 
         except Exception as e:
