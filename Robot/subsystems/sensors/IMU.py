@@ -198,15 +198,15 @@ class IMU():
             accel = None
             gyro = None
             if all(v is not None for v in (self.sensor.acceleration, self.sensor.gyro)):
-                accel = self.sensor.acceleration
-                gyro = self.sensor.gyro
+                accel = getattr(self.sensor, 'acceleration', None)
+                gyro = getattr(self.sensor, 'gyro', None)
             magnetic = None
             # only poll magnetic sensor at lower rate
             if self.mag_interval_elapsed() and all (v is not None for v in (self.sensor.magnetic)):
-                magnetic = self.sensor.magnetic
+                magnetic = getattr(self.sensor, 'magnetic', None)
             quat = None
             if all(v is not None for v in (self.sensor.quaternion)):
-                quat = self.sensor.quaternion
+                quat = getattr(self.sensor, 'quaternion', None)
             
             if accel is not None and gyro is not None:
                 accel_arr = np.asarray(accel, dtype=float)

@@ -20,6 +20,7 @@ class LogDataCmd(Command):
         
     def initalize(self):
         self.begin_timestamp = time.time()
+        print("LogDataCmd initialized, logging started.")
     
     def execute(self):
         """Sample UWB positions, estimator state, and IMU orientation once and append to CSVs.
