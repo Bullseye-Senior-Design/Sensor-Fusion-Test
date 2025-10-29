@@ -13,6 +13,7 @@ def main():
 
 
     robot.robot_init()
+    robot_state.enable_teleop()
     
     try:
         while True:        
