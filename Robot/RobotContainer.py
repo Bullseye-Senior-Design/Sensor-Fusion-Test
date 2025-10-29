@@ -12,8 +12,8 @@ class RobotContainer:
     def __init__(self):
         self.uwb = UWB()
         self.imu = IMU()
-        self.uwb.start(ports=['/dev/ttyACM0', '/dev/ttyACM1'])
-
+        self.uwb.start(ports=['/dev/ttyACM0', '/dev/ttyACM1'], anchors_pos=None)
                     
-    def teleop_init(self):
+    def begin_data_log(self):
         LogDataCmd().schedule()
+
