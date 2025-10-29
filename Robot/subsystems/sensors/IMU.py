@@ -9,7 +9,7 @@ import adafruit_bno055
 import math
 import numpy as np
 import time
-from subsystems.KalmanStateEstimator import KalmanStateEstimator
+from Robot.subsystems.KalmanStateEstimator import KalmanStateEstimator
 
 
 class MagnetometerReference:
@@ -149,8 +149,12 @@ class IMU():
         if not q or len(q) != 4:
             return (0.0, 0.0, 0.0)
 
+        # ensure quaternion components are numeric (replace None with 0.0)
+        def _safe(val):
+            return 0.0 if val is None else float(val)
+
         # assume quaternion is (w, x, y, z) as returned by Adafruit BNO055
-        w, x, y, z = q
+        w, x, y, z = (_safe(v) for v in q)
 
         # roll (x-axis rotation)
         sinr_cosp = 2.0 * (w * x + y * z)
@@ -191,22 +195,27 @@ class IMU():
     def update(self):
         # continuous update loop; keep reads outside lock and assign under lock
         while True:
-            accel = getattr(self.sensor, 'acceleration', None)
-            gyro = getattr(self.sensor, 'gyro', None)
+            accel = None
+            gyro = None
+            if all(v is not None for v in (self.sensor.acceleration, self.sensor.gyro)):
+                accel = self.sensor.acceleration
+                gyro = self.sensor.gyro
             magnetic = None
             # only poll magnetic sensor at lower rate
-            if self.mag_interval_elapsed():
-                magnetic = getattr(self.sensor, 'magnetic', None)
-            quat = getattr(self.sensor, 'quaternion', None)
+            if self.mag_interval_elapsed() and all (v is not None for v in (self.sensor.magnetic)):
+                magnetic = self.sensor.magnetic
+            quat = None
+            if all(v is not None for v in (self.sensor.quaternion)):
+                quat = self.sensor.quaternion
             
             if accel is not None and gyro is not None:
-                self.state_estimator.predict(accel_meas=accel, gyro_meas=gyro)
+                accel_arr = np.asarray(accel, dtype=float)
+                gyro_arr = np.asarray(gyro, dtype=float)
+                self.state_estimator.predict(accel_meas=accel_arr, gyro_meas=gyro_arr)
             if magnetic is not None:
-                # KalmanStateEstimator.update_mag requires a mag_ref (world-frame
-                # reference magnetic vector). Provide a simple default reference
-                # using a numpy array (matches the estimator's expected type).
+                mag_arr = np.asarray(magnetic, dtype=float)
                 mag_ref_world = np.array([0.0, 0.0, 1.0])
-                self.state_estimator.update_mag(magnetic, mag_ref_world)
+                self.state_estimator.update_mag(mag_arr, mag_ref_world)
 
             with self._lock:
                 if accel is not None:
