@@ -2,7 +2,7 @@ from Debug import Debug
 from Robot.Robot import Robot
 from structure.RobotState import RobotState
 from structure.Input.KeyboardListener import KeyboardListener
-from Robot.subsystems.uwb.UWB import UWB
+from Robot.subsystems.sensors.UWB import UWB
 
 import time
 
