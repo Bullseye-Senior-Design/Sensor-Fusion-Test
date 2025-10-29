@@ -9,6 +9,7 @@ import adafruit_bno055
 import math
 import numpy as np
 import time
+from typing import Optional, Tuple
 from Robot.subsystems.KalmanStateEstimator import KalmanStateEstimator
 
 
@@ -194,94 +195,52 @@ class IMU():
 
     def update(self):
         # continuous update loop; keep reads outside lock and assign under lock
-        while True:
-            accel = None
-            gyro = None
-            magnetic = None
-            quat = None
-
+            accel: Optional[Tuple[float, float, float]] = None
+            gyro: Optional[Tuple[float, float, float]] = None
+            magnetic: Optional[Tuple[float, float, float]] = None
+            quat: Optional[Tuple[float, float, float, float]] = None
+            
             # Read sensor attributes defensively: catching Remote I/O (or other) errors
-            try:
-                accel_val = self.sensor.acceleration
-            except Exception:
-                accel_val = None
-            try:
-                gyro_val = self.sensor.gyro
-            except Exception:
-                gyro_val = None
-            try:
-                mag_val = self.sensor.magnetic
-            except Exception:
-                mag_val = None
-            try:
-                quat_val = self.sensor.quaternion
-            except Exception:
-                quat_val = None
+            accel_val = self.sensor.acceleration
+            gyro_val = self.sensor.gyro
+            mag_val = self.sensor.magnetic
+            quat_val = self.sensor.quaternion
 
             # Use the pre-read values if available
-            if accel_val is not None and gyro_val is not None:
-                accel = accel_val
-                gyro = gyro_val
+            if all(v is not None for v in accel_val):
+                accel = accel_val # type: ignore
+            if all(v is not None for v in gyro_val):
+                gyro = gyro_val # type: ignore
             # only poll magnetic sensor at lower rate
-            if self.mag_interval_elapsed() and mag_val is not None:
-                magnetic = mag_val
-            if quat_val is not None:
-                quat = quat_val
+            if self.mag_interval_elapsed() and all(v is not None for v in mag_val):
+                magnetic = mag_val # type: ignore
+            if all(v is not None for v in quat_val):
+                quat = quat_val # type: ignore
 
             if accel is not None and gyro is not None:
-                try:
-                    accel_arr = np.asarray(accel, dtype=float)
-                    gyro_arr = np.asarray(gyro, dtype=float)
-                    self.state_estimator.predict(accel_meas=accel_arr, gyro_meas=gyro_arr)
-                except Exception:
-                    # ignore estimator errors to keep loop running
-                    pass
+                accel_arr = np.asarray(accel, dtype=float)
+                gyro_arr = np.asarray(gyro, dtype=float)
+                self.state_estimator.predict(accel_meas=accel_arr, gyro_meas=gyro_arr)
             if magnetic is not None:
-                try:
-                    mag_arr = np.asarray(magnetic, dtype=float)
-                    mag_ref_world = np.array([0.0, 0.0, 1.0])
-                    self.state_estimator.update_mag(mag_arr, mag_ref_world)
-                except Exception:
-                    pass
+                mag_arr = np.asarray(magnetic, dtype=float)
+                mag_ref_world = np.array([0.0, 0.0, 1.0])
+                self.state_estimator.update_mag(mag_arr, mag_ref_world)
 
             with self._lock:
                 if accel is not None:
-                    try:
-                        self.acceleration = tuple(accel)
-                    except Exception:
-                        pass
+                    self.acceleration = tuple(accel)
                 if gyro is not None:
-                    try:
-                        self.gyro = tuple(gyro)
-                    except Exception:
-                        pass
+                    self.gyro = tuple(gyro)
+
                 if magnetic is not None:
-                    try:
-                        self.magnetic = tuple(magnetic)
-                        # update last-mag timestamp only when we actually stored a magnetic sample
-                        self._last_mag_time = time.time()
-                    except Exception:
-                        pass
+                    self.magnetic = tuple(magnetic)
+                    # update last-mag timestamp only when we actually stored a magnetic sample
+                    self._last_mag_time = time.time()
                 if quat is not None:
-                    try:
-                        self.quat = tuple(quat)
-                    except Exception:
-                        pass
+                    self.quat = tuple(quat)
 
             # avoid busy loop
             time.sleep(self.interval)
              
     def end(self):
         pass
-
-
-if __name__ == '__main__':
-    # Small demo of MagnetometerReference usage (uses synthetic data).
-    print("MagnetometerReference demo")
-    mag = MagnetometerReference(offsets=(0.0, 0.0, 0.0), scales=(1.0, 1.0, 1.0))
-    raw = (30.0, -12.0, -5.0)
-    accel = (0.0, 0.0, -9.81)
-    print("Raw mag:", raw)
-    print("Calibrated mag:", mag.apply(raw))
-    print("Heading (no accel): {:.2f} deg".format(mag.heading(raw)))
-    print("Heading (with accel tilt comp): {:.2f} deg".format(mag.heading(raw, accel=accel)))
