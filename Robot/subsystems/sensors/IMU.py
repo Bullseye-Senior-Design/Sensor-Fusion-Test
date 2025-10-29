@@ -103,9 +103,10 @@ class IMU():
         # Otherwise, return already created instance
         if cls._instance is None:
             cls._instance = super().__new__(cls)
+            cls._instance._start()
         return cls._instance
 
-    def __init__(self):
+    def _start(self):
         
         i2c = board.I2C() # uses board.SCL and board.SDA
         self.sensor = adafruit_bno055.BNO055_I2C(i2c)
@@ -189,59 +190,61 @@ class IMU():
         return (time.time() - self._last_mag_time) >= self.mag_interval
     
     def begin(self):
+        def _update_loop():
+            while True:
+                self.update()
         
-        threading.Thread(target=self.update, daemon=True).start()
+        threading.Thread(target=_update_loop, daemon=True).start()
         
 
     def update(self):
         # continuous update loop; keep reads outside lock and assign under lock
-            accel: Optional[Tuple[float, float, float]] = None
-            gyro: Optional[Tuple[float, float, float]] = None
-            magnetic: Optional[Tuple[float, float, float]] = None
-            quat: Optional[Tuple[float, float, float, float]] = None
-            
-            # Read sensor attributes defensively: catching Remote I/O (or other) errors
-            accel_val = self.sensor.acceleration
-            gyro_val = self.sensor.gyro
-            mag_val = self.sensor.magnetic
-            quat_val = self.sensor.quaternion
-            print(f"IMU Readings - Accel: {accel_val}, Gyro: {gyro_val}, Mag: {mag_val}, Quat: {quat_val}")
+        accel: Optional[Tuple[float, float, float]] = None
+        gyro: Optional[Tuple[float, float, float]] = None
+        magnetic: Optional[Tuple[float, float, float]] = None
+        quat: Optional[Tuple[float, float, float, float]] = None
+        
+        accel_val = self.sensor.acceleration
+        gyro_val = self.sensor.gyro
+        mag_val = self.sensor.magnetic
+        quat_val = self.sensor.quaternion
+        print(f"IMU Readings - Accel: {accel_val}, Gyro: {gyro_val}, Mag: {mag_val}, Quat: {quat_val}")
 
-            # Use the pre-read values if available
-            if all(v is not None for v in accel_val):
-                accel = accel_val # type: ignore
-            if all(v is not None for v in gyro_val):
-                gyro = gyro_val # type: ignore
-            # only poll magnetic sensor at lower rate
-            if self.mag_interval_elapsed() and all(v is not None for v in mag_val):
-                magnetic = mag_val # type: ignore
-            if all(v is not None for v in quat_val):
-                quat = quat_val # type: ignore
+        # Use the pre-read values if available
+        if all(v is not None for v in accel_val):
+            accel = accel_val # type: ignore
+        if all(v is not None for v in gyro_val):
+            gyro = gyro_val # type: ignore
+        # only poll magnetic sensor at lower rate
+        if self.mag_interval_elapsed() and all(v is not None for v in mag_val):
+            magnetic = mag_val # type: ignore
+        if all(v is not None for v in quat_val):
+            quat = quat_val # type: ignore
 
-            if accel is not None and gyro is not None:
-                accel_arr = np.asarray(accel, dtype=float)
-                gyro_arr = np.asarray(gyro, dtype=float)
-                self.state_estimator.predict(accel_meas=accel_arr, gyro_meas=gyro_arr)
+        if accel is not None and gyro is not None:
+            accel_arr = np.asarray(accel, dtype=float)
+            gyro_arr = np.asarray(gyro, dtype=float)
+            self.state_estimator.predict(accel_meas=accel_arr, gyro_meas=gyro_arr)
+        if magnetic is not None:
+            mag_arr = np.asarray(magnetic, dtype=float)
+            mag_ref_world = np.array([0.0, 0.0, 1.0])
+            self.state_estimator.update_mag(mag_arr, mag_ref_world)
+
+        with self._lock:
+            if accel is not None:
+                self.acceleration = tuple(accel)
+            if gyro is not None:
+                self.gyro = tuple(gyro)
+
             if magnetic is not None:
-                mag_arr = np.asarray(magnetic, dtype=float)
-                mag_ref_world = np.array([0.0, 0.0, 1.0])
-                self.state_estimator.update_mag(mag_arr, mag_ref_world)
+                self.magnetic = tuple(magnetic)
+                # update last-mag timestamp only when we actually stored a magnetic sample
+                self._last_mag_time = time.time()
+            if quat is not None:
+                self.quat = tuple(quat)
 
-            with self._lock:
-                if accel is not None:
-                    self.acceleration = tuple(accel)
-                if gyro is not None:
-                    self.gyro = tuple(gyro)
-
-                if magnetic is not None:
-                    self.magnetic = tuple(magnetic)
-                    # update last-mag timestamp only when we actually stored a magnetic sample
-                    self._last_mag_time = time.time()
-                if quat is not None:
-                    self.quat = tuple(quat)
-
-            # avoid busy loop
-            time.sleep(self.interval)
+        # avoid busy loop
+        time.sleep(self.interval)
              
     def end(self):
         pass
