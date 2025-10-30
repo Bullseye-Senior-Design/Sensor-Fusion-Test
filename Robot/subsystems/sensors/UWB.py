@@ -29,22 +29,21 @@ class UWB:
 
     def start(
         self,
-        ports: List[str],
+        uwb_tag_data: List[UWBTagInfo],
         anchors_pos: List[Tuple[int, float, float, float]] | None,
         baudrate: int = 115200,
         timeout: float = 1.0,
         interval: float = 0.1,
         start_immediately: bool = True,
     ):
-        port_list = list(ports)
         self.interval = interval
         
         self.anchors_pos = anchors_pos
 
         # Use Any here so static checkers don't require resolving UWBTag symbols
         self.tags: List[UWBTag] = []
-        for p in port_list:
-            tag = UWBTag(port=p, anchors_pos_override=anchors_pos, baudrate=baudrate, timeout=timeout)
+        for tag_info in uwb_tag_data:
+            tag = UWBTag(port=tag_info.port, anchors_pos_override=anchors_pos, baudrate=baudrate, timeout=timeout, tag_offset=tag_info.offset)
             self.tags.append(tag)
 
         if start_immediately:

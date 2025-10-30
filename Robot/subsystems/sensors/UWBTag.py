@@ -50,7 +50,7 @@ class UWBTag:
     Class to handle communication with DWM1001-DEV tag and read position data
     """
     
-    def __init__(self, port: str, anchors_pos_override: Optional[List[Tuple[int, float, float, float]]] = None, baudrate: int = 115200, timeout: float = 1.0):
+    def __init__(self, port: str, anchors_pos_override: Optional[List[Tuple[int, float, float, float]]] = None, baudrate: int = 115200, timeout: float = 1.0, tag_offset: float = 0.0):
         """
         Initialize the DWM1001 reader
         
@@ -63,6 +63,7 @@ class UWBTag:
         self.baudrate = baudrate
         self.timeout = timeout
         self.anchors_pos_override = anchors_pos_override
+        self.tag_offset = tag_offset
         
         self.serial_connection: Optional[serial.Serial] = None
         self.is_connected = False
@@ -316,7 +317,7 @@ class UWBTag:
                 anchors, position = self.get_location_data()
                 
                 for anchor in anchors or []:
-                    self.state_estimator.update_uwb_range(anchor['position'], anchor['range'])
+                    self.state_estimator.update_uwb_range(anchor['position'], anchor['range'], self.tag_offset)
                 
                 # store anchors if provided
                 if anchors:
