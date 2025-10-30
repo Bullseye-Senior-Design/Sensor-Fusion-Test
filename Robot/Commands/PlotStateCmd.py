@@ -169,11 +169,9 @@ class PlotStateCmd(Command):
 
         # update top-down yaw view (do this after drawing to avoid flicker)
         if self.ax_top is not None:
-            try:
-                euler = self.estimator.euler  # [roll, pitch, yaw]
-                yaw = float(euler[2])
-            except Exception:
-                yaw = 0.0
+            euler = self.estimator.euler  # [roll, pitch, yaw]
+            yaw = float(euler[2])
+
 
             # apply rotation to truck patches around origin
             trans = mtransforms.Affine2D().rotate(yaw) + self.ax_top.transData
