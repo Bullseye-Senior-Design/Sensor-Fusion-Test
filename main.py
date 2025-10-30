@@ -1,7 +1,6 @@
 from Debug import Debug
 from Robot.Robot import Robot
 from structure.RobotState import RobotState
-from structure.Input.KeyboardListener import KeyboardListener
 from Robot.subsystems.sensors.UWB import UWB
 
 import time
@@ -18,7 +17,6 @@ def main():
     try:
         while True:        
             # Run periodic functions
-            KeyboardListener().update()      
             robot.robot_periodic()
             
             # Teleop (human operated) mode
