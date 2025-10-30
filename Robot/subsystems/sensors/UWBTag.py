@@ -21,6 +21,7 @@ import threading
 from dataclasses import dataclass
 from typing import Optional, Dict, Any, List, Tuple
 import logging
+import numpy as np
 from Robot.subsystems.KalmanStateEstimator import KalmanStateEstimator
 
 # Configure logging
@@ -315,9 +316,9 @@ class UWBTag:
         def read_loop():
             while self.is_reading:
                 anchors, position = self.get_location_data()
-                
                 for anchor in anchors or []:
-                    self.state_estimator.update_uwb_range(anchor['position'], anchor['range'], self.tag_offset)
+                    # convert optional tuple tag_offset to numpy array to satisfy estimator API
+                    self.state_estimator.update_uwb_range(anchor['position'], anchor['range'], np.array(self.tag_offset))
                 
                 # store anchors if provided
                 if anchors:
