@@ -49,8 +49,8 @@ class UWBTag:
     """
     Class to handle communication with DWM1001-DEV tag and read position data
     """
-    
-    def __init__(self, port: str, anchors_pos_override: Optional[List[Tuple[int, float, float, float]]] = None, baudrate: int = 115200, timeout: float = 1.0, tag_offset: float = 0.0):
+
+    def __init__(self, port: str, anchors_pos_override: Optional[List[Tuple[int, float, float, float]]] = None, baudrate: int = 115200, timeout: float = 1.0, tag_offset: Optional[Tuple[float, float, float]] = None):
         """
         Initialize the DWM1001 reader
         

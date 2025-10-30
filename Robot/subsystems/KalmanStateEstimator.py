@@ -232,19 +232,49 @@ class KalmanStateEstimator:
             # Covariance propagate
             self.P = Phi @ self.P @ Phi.T + Qd
 
-    def update_uwb_range(self, anchor_pos: np.ndarray, range_meas: float, tag_offset: float = 0.0):
+    def update_uwb_range(self, anchor_pos: np.ndarray, range_meas: float, tag_offset: np.ndarray = None):
         """UWB range measurement to known anchor position in world frame.
 
-        z (scalar) is the measured range to the anchor.
+        Args:
+            anchor_pos: 3D position of UWB anchor in world frame (3,)
+            range_meas: measured range (scalar) from tag to anchor
+            tag_offset: 3D offset of UWB tag from robot center in body frame (3,)
+                       If None, assumes tag is at robot center
         """
         with self._lock:
             z = range_meas
-            h = np.linalg.norm(self.pos - anchor_pos)
+            
+            # Get current rotation matrix to transform body frame to world frame
+            q = quat_normalize(self.quat)
+            R = quat_to_rotmat(q)
+            
+            # Calculate tag position in world frame
+            # tag_pos_world = robot_pos + R @ tag_offset_body
+            if tag_offset is not None:
+                tag_pos_world = self.pos + R @ tag_offset
+            else:
+                tag_pos_world = self.pos
+            
+            # Predicted range from tag to anchor
+            diff = tag_pos_world - anchor_pos
+            h = np.linalg.norm(diff)
             if h < 1e-8:
                 return
-            # measurement Jacobian H (1x15) wrt error-state (pos, vel, att, ba, bg)
+            
+            # Measurement Jacobian H (1x15) wrt error-state [pos, vel, att, ba, bg]
             H = np.zeros((1, 15))
-            H[0, 0:3] = (self.pos - anchor_pos) / h
+            
+            # Partial derivative w.r.t position: d(range)/d(pos) = diff / h
+            H[0, 0:3] = diff / h
+            
+            # Partial derivative w.r.t attitude (due to tag offset rotation)
+            if tag_offset is not None:
+                def skew(v):
+                    return np.array([[0, -v[2], v[1]], [v[2], 0, -v[0]], [-v[1], v[0], 0]])
+                
+                # d(tag_pos)/d(theta) = d(R @ tag_offset)/d(theta) = R @ [tag_offset]_x
+                # d(range)/d(theta) = (diff/h)^T @ d(tag_pos)/d(theta)
+                H[0, 6:9] = (diff / h) @ R @ skew(tag_offset)
 
             S = H @ self.P @ H.T + self.R_uwb_range
             K = (self.P @ H.T) / S
