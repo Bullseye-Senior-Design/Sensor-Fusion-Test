@@ -3,6 +3,7 @@ from .UWBTag import UWBTag, Position
 import logging
 import threading
 import time
+from Robot.Constants import UWBTagInfo
 
 logger = logging.getLogger(__name__)
 
