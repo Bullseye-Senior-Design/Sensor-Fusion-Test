@@ -1,5 +1,4 @@
-
-
+from Robot.Constants import Constants
 from structure.commands.InstantCommand import InstantCommand
 from structure.commands.SequentialCommandGroup import SequentialCommandGroup
 from Robot.subsystems.sensors.UWB import UWB
@@ -10,7 +9,7 @@ class RobotContainer:
     def __init__(self):
         self.uwb = UWB()
         self.imu = IMU()
-        self.uwb.start(ports=['/dev/ttyACM0', '/dev/ttyACM1'], anchors_pos=None)
+        self.uwb.start(uwb_tag_data=Constants.uwb_tag_data, anchors_pos=None)
                     
     def begin_data_log(self):
         LogDataCmd().schedule()

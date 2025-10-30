@@ -232,7 +232,7 @@ class KalmanStateEstimator:
             # Covariance propagate
             self.P = Phi @ self.P @ Phi.T + Qd
 
-    def update_uwb_range(self, anchor_pos: np.ndarray, range_meas: float):
+    def update_uwb_range(self, anchor_pos: np.ndarray, range_meas: float, tag_offset: float = 0.0):
         """UWB range measurement to known anchor position in world frame.
 
         z (scalar) is the measured range to the anchor.
