@@ -141,8 +141,7 @@ class IMU():
             accel = accel_val # type: ignore
         if all(v is not None for v in gyro_val):
             gyro = gyro_val # type: ignore
-        # only poll magnetic sensor at lower rate
-        if self.mag_interval_elapsed() and all(v is not None for v in mag_val):
+        if mag_val is not None and all(v is not None for v in mag_val):
             magnetic = mag_val # type: ignore
         if all(v is not None for v in quat_val):
             quat = quat_val # type: ignore
