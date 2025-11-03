@@ -125,7 +125,14 @@ class IMU():
         
         accel_val = self.sensor.acceleration
         gyro_val = self.sensor.gyro
-        mag_val = self.sensor.magnetic
+        mag_val = [None, None, None]
+        if(self.mag_interval_elapsed()):
+            try:
+                mag_val = self.sensor.magnetic
+            except Exception as e:
+                print(f"IMU Readings - Mag: {e}")
+                
+
         quat_val = self.sensor.quaternion
         # print(f"IMU Readings - Accel: {accel_val}, Gyro: {gyro_val}, Mag: {mag_val}, Quat: {quat_val}")
 
