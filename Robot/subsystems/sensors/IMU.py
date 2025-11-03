@@ -125,7 +125,7 @@ class IMU():
         
         accel_val = self.sensor.acceleration
         gyro_val = self.sensor.gyro
-        mag_val = [None, None, None]
+        mag_val = None
         if(self.mag_interval_elapsed()):
             try:
                 mag_val = self.sensor.magnetic
