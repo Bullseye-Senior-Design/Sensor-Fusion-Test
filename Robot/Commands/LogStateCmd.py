@@ -67,8 +67,8 @@ class LogDataCmd(Command):
             try:
                 if hasattr(uwb, 'get_latest_anchor_info'):
                     anchors = uwb.get_latest_anchor_info()
-                    anchor_file = _make_log_filename('uwb_anchors', 'txt')
-                    self.save_uwb_anchors_to_txt(anchors, anchor_file, timestamp=ts)
+                    anchor_file = _make_log_filename('uwb_anchors', 'csv')
+                    self.save_uwb_anchors_to_csv(anchors, anchor_file, timestamp=ts)
             except Exception as e:
                 print(f"UWB anchor save error: {e}")
         except Exception as e:
@@ -85,6 +85,13 @@ class LogDataCmd(Command):
             roll = float(euler[0]) * 180.0 / 3.141592653589793
             state_file = _make_log_filename('state_estimator')
             self.save_state_to_csv(state, yaw, pitch, roll, state_file, timestamp=ts)
+            # Also log covariance matrix (EKF P)
+            try:
+                cov_file = _make_log_filename('ekf_covariance', 'csv')
+                if hasattr(kf, 'P'):
+                    self.save_covariance_to_csv(kf.P, cov_file, timestamp=ts)
+            except Exception as e:
+                print(f"Covariance save error: {e}")
         except Exception as e:
             print(f"State estimator read error: {e}")
 
@@ -191,31 +198,46 @@ class LogDataCmd(Command):
             print(f"Error saving orientation to CSV: {e}")
             return False
 
-    def save_uwb_anchors_to_txt(self, anchors_info, filename: str, timestamp: Optional[float] = None) -> bool:
-        """Append the latest UWB anchor info to a text file as JSON per line.
+    def save_uwb_anchors_to_csv(self, anchors_info, filename: str, timestamp: Optional[float] = None) -> bool:
+        """Save UWB anchor info into a CSV file.
 
-        anchors_info is expected to be the list returned by UWB.get_latest_anchor_info(),
-        typically a list of tuples (port, anchors) where anchors is a list or None.
+        anchors_info: expected to be the list returned by UWB.get_latest_anchor_info(),
+                      i.e., a list of tuples (port, anchors) where anchors is a list of dicts
+                      (each dict has keys 'name','id','position'=(x,y,z),'range').
+        The CSV columns will be: timestamp, port, name, id, x, y, z, range
         """
         try:
             filename = str(filename)
             file_exists = os.path.exists(filename)
 
-            with open(filename, 'a', newline='') as f:
-                # optionally write a small header when creating the file
+            with open(filename, 'a', newline='') as csvfile:
+                fieldnames = ['timestamp', 'port', 'name', 'id', 'x', 'y', 'z', 'range']
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
                 if not file_exists:
-                    f.write('UWB Anchor Info Log\n')
-                    f.write('Each line is a JSON object: {"timestamp": <unix>, "port": <port>, "anchors": <anchors>}\n')
+                    writer.writeheader()
+                    print(f"Created new CSV file: {filename}")
 
                 ts = timestamp if timestamp is not None else time.time()
-                # anchors_info is a list of (port, anchors)
-                for port, anchors in anchors_info:
-                    entry = {'timestamp': ts, 'port': port, 'anchors': anchors}
-                    f.write(json.dumps(entry) + '\n')
+
+                # anchors_info is list of (port, anchors) tuples
+                for port, anchors in anchors_info or []:
+                    if not anchors:
+                        # write a row indicating no anchors for this port
+                        writer.writerow({'timestamp': ts, 'port': port, 'name': '', 'id': '', 'x': '', 'y': '', 'z': '', 'range': ''})
+                        continue
+                    for anchor in anchors:
+                        name = anchor.get('name', '')
+                        aid = anchor.get('id', '')
+                        pos = anchor.get('position', (None, None, None))
+                        rng = anchor.get('range', '')
+                        x = pos[0] if pos and len(pos) > 0 else ''
+                        y = pos[1] if pos and len(pos) > 1 else ''
+                        z = pos[2] if pos and len(pos) > 2 else ''
+                        writer.writerow({'timestamp': ts, 'port': port, 'name': name, 'id': aid, 'x': x, 'y': y, 'z': z, 'range': rng})
 
             return True
         except Exception as e:
-            print(f"Error saving UWB anchors to TXT: {e}")
+            print(f"Error saving UWB anchors to CSV: {e}")
             return False
 
     def save_state_to_csv(self, state, yaw: float, pitch: float, roll: float, filename: str, timestamp: Optional[float] = None) -> bool:
@@ -248,4 +270,49 @@ class LogDataCmd(Command):
             return True
         except Exception as e:
             print(f"Error saving state to CSV: {e}")
+            return False
+
+    def save_covariance_to_csv(self, P, filename: str, timestamp: Optional[float] = None) -> bool:
+        """Save a square covariance matrix P as a single row in CSV.
+
+        Columns: timestamp, p00, p01, ..., p0n, p10, p11, ..., pnn
+        """
+        try:
+            filename = str(filename)
+            file_exists = os.path.exists(filename)
+
+            # convert to nested list if numpy array
+            try:
+                rows = P.tolist()
+            except Exception:
+                # assume P is already list-like
+                rows = [list(r) for r in P]
+
+            n = len(rows)
+            # validate square
+            if any(len(r) != n for r in rows):
+                print(f"Covariance matrix is not square: {filename}")
+                return False
+
+            # build fieldnames
+            fieldnames = ['timestamp'] + [f'p{i}{j}' for i in range(n) for j in range(n)]
+
+            with open(filename, 'a', newline='') as csvfile:
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                if not file_exists:
+                    writer.writeheader()
+                    print(f"Created new CSV file: {filename}")
+
+                ts = timestamp if timestamp is not None else time.time()
+                flat = {}
+                flat['timestamp'] = ts
+                for i in range(n):
+                    for j in range(n):
+                        flat[f'p{i}{j}'] = rows[i][j]
+
+                writer.writerow(flat)
+
+            return True
+        except Exception as e:
+            print(f"Error saving covariance to CSV: {e}")
             return False
