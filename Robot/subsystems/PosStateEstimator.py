@@ -200,16 +200,3 @@ class PosStateEstimator:
         z = w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2
         w = w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2
         return np.array([x, y, z, w])
-
-
-if __name__ == "__main__":
-    # quick smoke test / usage example
-    est = PosStateEstimator(dt=0.1)
-    print("initial pos", est.pos)
-    # simulate fused positions at 1 m/s along x
-    for i in range(1, 6):
-        fused = np.array([i * 0.1, 0.0, 0.0])
-        est.predict(0.1)
-        est.update_fused_position(fused)
-        s = est.get_state()
-        print(f"t={i*0.1:.1f}s pos={s.pos} vel={s.vel}")
