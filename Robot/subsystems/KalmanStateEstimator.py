@@ -178,10 +178,13 @@ class KalmanStateEstimator:
                 quat=tuple(self.x[6:10]),
             )
 
+    # Replace the existing predict, update_mag and _inject_error_state methods with these.
+
     def predict(self, accel_meas: np.ndarray, gyro_meas: np.ndarray):
         """Predict step using IMU measurements (body frame accel and angular rate).
 
         accel_meas and gyro_meas are raw sensor readings (3,).
+        Added: diagnostics and a safety clamp for excessive world acceleration.
         """
         with self._lock:
             dt = self.dt
@@ -193,9 +196,24 @@ class KalmanStateEstimator:
             q = quat_normalize(self.quat)
             R = quat_to_rotmat(q)
 
+            # compute world acceleration
+            a_world = R @ a + GRAVITY
+            a_world_norm = np.linalg.norm(a_world)
+
+            # Diagnostic: detect huge world acceleration (possible quat/R or accel unit problem)
+            if not np.isfinite(a_world_norm) or a_world_norm > 100.0:
+                print(f"[KF predict] WARNING: large/invalid world accel |a_world|={a_world_norm:.3e}, a_body={a}, quat={q}")
+                # protect against NaNs or extremely large values by clamping
+                if not np.isfinite(a_world_norm):
+                    # don't use a_world if it's NaN/Inf: fallback to gravity only (stop integrating bogus accel)
+                    a_world = GRAVITY.copy()
+                else:
+                    # clamp magnitude while preserving direction
+                    a_world = a_world * (50.0 / a_world_norm)
+
             # kinematic propagation
-            self.x[0:3] = self.pos + self.vel * dt + 0.5 * (R @ a + GRAVITY) * dt * dt
-            self.x[3:6] = self.vel + (R @ a + GRAVITY) * dt
+            self.x[0:3] = self.pos + self.vel * dt + 0.5 * a_world * dt * dt
+            self.x[3:6] = self.vel + a_world * dt
 
             # attitude update via small-angle approximation
             dq = small_angle_quat(w * dt)
@@ -211,9 +229,7 @@ class KalmanStateEstimator:
             # pos dot = vel
             F[0:3, 3:6] = np.eye(3)
             # vel depends on attitude and accel bias
-            # vel_dot ~ R * (a) => partial wrt attitude ~ -R * [a]_x (attitude small-angle)
             ax = a
-            # skew-symmetric of accel in body frame expressed in world: R @ ax cross
             def skew(v):
                 return np.array([[0, -v[2], v[1]], [v[2], 0, -v[0]], [-v[1], v[0], 0]])
 
@@ -239,7 +255,7 @@ class KalmanStateEstimator:
             anchor_pos: 3D position of UWB anchor in world frame (3,)
             range_meas: measured range (scalar) from tag to anchor
             tag_offset: 3D offset of UWB tag from robot center in body frame (3,)
-                       If None, assumes tag is at robot center
+                    If None, assumes tag is at robot center
         """
         with self._lock:
             z = range_meas
@@ -293,6 +309,8 @@ class KalmanStateEstimator:
 
         We predict mag in body frame: b_body = R.T @ mag_ref_world
         and compare to measured mag_meas.
+
+        Added: a simple plausibility check and diagnostic print for large innovations.
         """
         with self._lock:
             q = quat_normalize(self.quat)
@@ -300,18 +318,64 @@ class KalmanStateEstimator:
             b_pred = R.T @ mag_ref
 
             H = np.zeros((3, 15))
-            # derivative wrt attitude: d(R.T v)/dtheta ~ -R.T [v]_x
             def skew(v):
                 return np.array([[0, -v[2], v[1]], [v[2], 0, -v[0]], [-v[1], v[0], 0]])
 
             H[:, 6:9] = -R.T @ skew(mag_ref)
 
             S = H @ self.P @ H.T + self.R_mag
-            K = self.P @ H.T @ np.linalg.inv(S)
 
+            # raw innovation
             y = mag_meas - b_pred
-            dx = K @ y
-            self._inject_error_state(dx.flatten())
+            y_norm = np.linalg.norm(y)
+
+            # basic plausibility: reject obviously bogus magnetometer readings early
+            mag_norm = np.linalg.norm(mag_meas)
+            if not np.isfinite(mag_norm) or mag_norm <= 1e-6 or mag_norm > 2000.0:
+                print(f"[KF update_mag] Rejected mag sample (plausibility) mag_norm={mag_norm:.3e}, y_norm={y_norm:.3e}")
+                return
+
+            # Mahalanobis gating (optional; prevents HUGE updates from outliers)
+            try:
+                Sinv = np.linalg.inv(S)
+            except np.linalg.LinAlgError:
+                print("[KF update_mag] S inversion failed, skipping mag update")
+                return
+            d2 = float(y.T @ Sinv @ y)
+            CHI2_3D_99 = 11.34
+            if d2 > CHI2_3D_99:
+                print(f"[KF update_mag] Innovation gated out (d2={d2:.3f}, |y|={y_norm:.3f})")
+                return
+
+            K = self.P @ H.T @ Sinv
+            dx = (K @ y).flatten()
+
+            # Protective clamps for the injected corrections (diagnostic + safety)
+            norm_dx = np.linalg.norm(dx)
+            if not np.isfinite(norm_dx) or norm_dx > 1e3:
+                print(f"[KF update_mag] large/infinite dx detected (|dx|={norm_dx:.3e}), clipping and injecting partial correction")
+                # clamp dtheta and dv and dp to safe limits
+                # dp clamp
+                dp = dx[0:3]
+                dpn = np.linalg.norm(dp)
+                if dpn > 100.0:
+                    dx[0:3] = dp * (100.0 / dpn)
+                # dv clamp
+                dv = dx[3:6]
+                dvn = np.linalg.norm(dv)
+                if dvn > 50.0:
+                    dx[3:6] = dv * (50.0 / dvn)
+                # dtheta clamp
+                dth = dx[6:9]
+                dthn = np.linalg.norm(dth)
+                if dthn > np.deg2rad(60.0):
+                    dx[6:9] = dth * (np.deg2rad(60.0) / dthn)
+
+            # print small diagnostic for moderate corrections (tune or remove in production)
+            if np.linalg.norm(dx) > 0.5:
+                print(f"[KF update_mag] injecting dx (|dx|={np.linalg.norm(dx):.3f}, |y|={y_norm:.3f}, d2={d2:.3f})")
+
+            self._inject_error_state(dx)
 
             self.P = (np.eye(15) - K @ H) @ self.P
 
@@ -319,23 +383,37 @@ class KalmanStateEstimator:
         """Inject 15-vector error state into the full state x and renormalize quaternion.
 
         dx layout: [dp(3), dv(3), dtheta(3), dba(3), dbg(3)]
+        This added instrumentation prints large dx and protects against NaNs.
         """
         if dx.shape[0] != 15:
             raise ValueError("dx must be length 15")
-        # All injections must be done under lock to prevent races. If caller already
-        # holds the lock it's safe because we use RLock.
         with self._lock:
-            # pos
-            self.x[0:3] = self.pos + dx[0:3]
-            # vel
-            self.x[3:6] = self.vel + dx[3:6]
-            # attitude: apply small-angle
+            # Diagnostics
+            if not np.all(np.isfinite(dx)):
+                print(f"[KF _inject_error_state] ERROR: dx contains non-finite values: {dx}")
+                # sanitize: replace non-finite with zeros
+                dx = np.nan_to_num(dx, nan=0.0, posinf=0.0, neginf=0.0)
+
+            dp = dx[0:3]
+            dv = dx[3:6]
             dtheta = dx[6:9]
+            dba = dx[9:12]
+            dbg = dx[12:15]
+
+            if np.linalg.norm(dx) > 1.0:
+                print(f"[KF _inject_error_state] Large injection: |dx|={np.linalg.norm(dx):.3f} dp={dp} dv={dv} dtheta={dtheta}")
+
+            # pos
+            self.x[0:3] = self.pos + dp
+            # vel
+            self.x[3:6] = self.vel + dv
+            # attitude: apply small-angle
             dq = small_angle_quat(dtheta)
             q = self.quat
             q_new = quat_mul(dq, q)
-            self.x[6:10] = quat_normalize(q_new)
+            q_new = quat_normalize(q_new)
+            self.x[6:10] = q_new
             # accel bias
-            self.x[10:13] = self.ba + dx[9:12]
+            self.x[10:13] = self.ba + dba
             # gyro bias
-            self.x[13:16] = self.bg + dx[12:15]
+            self.x[13:16] = self.bg + dbg
