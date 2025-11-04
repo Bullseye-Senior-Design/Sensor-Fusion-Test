@@ -5,6 +5,7 @@ import csv
 import os
 import time
 import json
+import numpy as np
 from types import SimpleNamespace
 from pathlib import Path
 from typing import Optional
@@ -84,12 +85,15 @@ class LogDataCmd(Command):
             pitch = float(euler[1]) * 180.0 / 3.141592653589793
             roll = float(euler[0]) * 180.0 / 3.141592653589793
             state_file = _make_log_filename('state_estimator')
-            self.save_state_to_csv(state, yaw, pitch, roll, state_file, timestamp=ts)
+            # include accelerometer and gyro biases from the estimator
+            bax, bay, baz = tuple(kf.ba)
+            bgx, bgy, bgz = tuple(kf.bg)
+            self.save_state_to_csv(state, yaw, pitch, roll, state_file, timestamp=ts, ba=(bax, bay, baz), bg=(bgx, bgy, bgz))
             # Also log covariance matrix (EKF P)
             try:
-                cov_file = _make_log_filename('ekf_covariance', 'csv')
+                cov_file = _make_log_filename('ekf_covariance', 'txt')
                 if hasattr(kf, 'P'):
-                    self.save_covariance_to_csv(kf.P, cov_file, timestamp=ts)
+                    self.save_covariance_to_txt(kf.P, cov_file, timestamp=ts)
             except Exception as e:
                 print(f"Covariance save error: {e}")
         except Exception as e:
@@ -240,13 +244,18 @@ class LogDataCmd(Command):
             print(f"Error saving UWB anchors to CSV: {e}")
             return False
 
-    def save_state_to_csv(self, state, yaw: float, pitch: float, roll: float, filename: str, timestamp: Optional[float] = None) -> bool:
-        """Save estimator state (pos, vel, euler) to CSV."""
+    def save_state_to_csv(self, state, yaw: float, pitch: float, roll: float, filename: str, timestamp: Optional[float] = None, ba: Optional[tuple] = None, bg: Optional[tuple] = None) -> bool:
+        """Save estimator state (pos, vel, euler) and biases to CSV.
+
+        ba: optional 3-tuple (bax, bay, baz)
+        bg: optional 3-tuple (bgx, bgy, bgz)
+        """
         try:
             filename = str(filename)
             file_exists = os.path.exists(filename)
             with open(filename, 'a', newline='') as csvfile:
-                fieldnames = ['timestamp', 'px', 'py', 'pz', 'vx', 'vy', 'vz', 'yaw', 'pitch', 'roll']
+                # include bias columns if provided
+                fieldnames = ['timestamp', 'px', 'py', 'pz', 'vx', 'vy', 'vz', 'bax', 'bay', 'baz', 'bgx', 'bgy', 'bgz', 'yaw', 'pitch', 'roll']
                 writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
                 if not file_exists:
                     writer.writeheader()
@@ -255,6 +264,8 @@ class LogDataCmd(Command):
                 ts = timestamp if timestamp is not None else time.time()
                 px, py, pz = state.pos
                 vx, vy, vz = state.vel
+                bax_val, bay_val, baz_val = (('', '', '') if ba is None else ba)
+                bgx_val, bgy_val, bgz_val = (('', '', '') if bg is None else bg)
                 writer.writerow({
                     'timestamp': ts,
                     'px': px,
@@ -263,6 +274,12 @@ class LogDataCmd(Command):
                     'vx': vx,
                     'vy': vy,
                     'vz': vz,
+                    'bax': bax_val,
+                    'bay': bay_val,
+                    'baz': baz_val,
+                    'bgx': bgx_val,
+                    'bgy': bgy_val,
+                    'bgz': bgz_val,
                     'yaw': yaw,
                     'pitch': pitch,
                     'roll': roll,
@@ -272,47 +289,37 @@ class LogDataCmd(Command):
             print(f"Error saving state to CSV: {e}")
             return False
 
-    def save_covariance_to_csv(self, P, filename: str, timestamp: Optional[float] = None) -> bool:
-        """Save a square covariance matrix P as a single row in CSV.
+    def save_covariance_to_txt(self, P, filename: str, timestamp: Optional[float] = None) -> bool:
+        """Save covariance matrix in a readable text file.
 
-        Columns: timestamp, p00, p01, ..., p0n, p10, p11, ..., pnn
+        The file will contain a timestamp header followed by the matrix rows.
+        Multiple calls append additional blocks (so the file contains history).
         """
         try:
             filename = str(filename)
             file_exists = os.path.exists(filename)
 
-            # convert to nested list if numpy array
-            try:
-                rows = P.tolist()
-            except Exception:
-                # assume P is already list-like
-                rows = [list(r) for r in P]
-
-            n = len(rows)
-            # validate square
-            if any(len(r) != n for r in rows):
-                print(f"Covariance matrix is not square: {filename}")
+            # ensure numpy array
+            P_arr = np.asarray(P)
+            if P_arr.ndim != 2 or P_arr.shape[0] != P_arr.shape[1]:
+                print(f"Covariance must be a square 2D array, got shape {P_arr.shape}")
                 return False
 
-            # build fieldnames
-            fieldnames = ['timestamp'] + [f'p{i}{j}' for i in range(n) for j in range(n)]
+            ts = timestamp if timestamp is not None else time.time()
 
-            with open(filename, 'a', newline='') as csvfile:
-                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-                if not file_exists:
-                    writer.writeheader()
-                    print(f"Created new CSV file: {filename}")
+            with open(filename, 'a') as f:
+                # write a small block header for readability
+                f.write(f"# timestamp: {ts}\n")
+                # write matrix rows with nice formatting
+                # use scientific notation with reasonable precision
+                for row in P_arr:
+                    f.write('  '.join(f"{val: .6e}" for val in row) + "\n")
+                f.write("\n")
 
-                ts = timestamp if timestamp is not None else time.time()
-                flat = {}
-                flat['timestamp'] = ts
-                for i in range(n):
-                    for j in range(n):
-                        flat[f'p{i}{j}'] = rows[i][j]
-
-                writer.writerow(flat)
+            if not file_exists:
+                print(f"Created new covariance TXT file: {filename}")
 
             return True
         except Exception as e:
-            print(f"Error saving covariance to CSV: {e}")
+            print(f"Error saving covariance to TXT: {e}")
             return False
