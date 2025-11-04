@@ -9,6 +9,7 @@ from matplotlib import patches
 from matplotlib import transforms as mtransforms
 
 from Robot.subsystems.KalmanStateEstimator import KalmanStateEstimator
+from Robot.subsystems.sensors.IMU import IMU
 
 
 class PlotStateCmd(Command):
@@ -43,6 +44,7 @@ class PlotStateCmd(Command):
 
         # estimator instance
         self.estimator = KalmanStateEstimator()
+        self.imu = IMU()
 
     def initalize(self):
         # Create Tk window and Matplotlib canvas. We do NOT call mainloop;
@@ -169,7 +171,7 @@ class PlotStateCmd(Command):
 
         # update top-down yaw view (do this after drawing to avoid flicker)
         if self.ax_top is not None:
-            euler = self.estimator.euler  # [roll, pitch, yaw]
+            euler = self.imu.get_euler()  # [roll, pitch, yaw]
             yaw = float(euler[2])
 
 
