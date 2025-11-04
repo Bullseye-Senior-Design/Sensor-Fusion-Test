@@ -104,8 +104,23 @@ class LogDataCmd(Command):
             imu = IMU()
             # IMU may be running in its own thread; get_euler returns (heading, roll, pitch)
             heading, roll, pitch = imu.get_euler()
-            orient = SimpleNamespace(timestamp=ts, yaw=heading, pitch=pitch, roll=roll)
+            # get raw sensor measurements (accel, gyro, mag)
+            try:
+                accel = imu.get_accel()
+            except Exception:
+                accel = None
+            try:
+                gyro = imu.get_gyro()
+            except Exception:
+                gyro = None
+            try:
+                mag = imu.get_mag()
+            except Exception:
+                mag = None
+
+            orient = SimpleNamespace(timestamp=ts, yaw=heading, pitch=pitch, roll=roll, accel=accel, gyro=gyro, mag=mag)
             imu_file = _make_log_filename('imu_orientation')
+            # save orientation and raw sensor values
             self.save_orientation_to_csv(orient, imu_file)
         except Exception as e:
             print(f"IMU read error: {e}")
@@ -181,20 +196,46 @@ class LogDataCmd(Command):
         try:
             filename = str(filename)
             file_exists = os.path.exists(filename)
-
             with open(filename, 'a', newline='') as csvfile:
-                fieldnames = ['timestamp', 'yaw', 'pitch', 'roll']
+                # include raw accel/gyro/mag columns
+                fieldnames = ['timestamp', 'yaw', 'pitch', 'roll',
+                              'ax', 'ay', 'az', 'gx', 'gy', 'gz', 'mx', 'my', 'mz']
                 writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
                 if not file_exists:
                     writer.writeheader()
                     print(f"Created new CSV file: {filename}")
 
                 ts = getattr(orientation, 'timestamp', time.time())
+
+                # helper to safely extract 3-tuple or return empties
+                def _triplet(val):
+                    if val is None:
+                        return ('', '', '')
+                    try:
+                        # allow lists/tuples/ndarrays
+                        a, b, c = val
+                        return (a if a is not None else '', b if b is not None else '', c if c is not None else '')
+                    except Exception:
+                        return ('', '', '')
+
+                ax, ay, az = _triplet(getattr(orientation, 'accel', None))
+                gx, gy, gz = _triplet(getattr(orientation, 'gyro', None))
+                mx, my, mz = _triplet(getattr(orientation, 'mag', None))
+
                 writer.writerow({
                     'timestamp': ts,
                     'yaw': getattr(orientation, 'yaw', ''),
                     'pitch': getattr(orientation, 'pitch', ''),
                     'roll': getattr(orientation, 'roll', ''),
+                    'ax': ax,
+                    'ay': ay,
+                    'az': az,
+                    'gx': gx,
+                    'gy': gy,
+                    'gz': gz,
+                    'mx': mx,
+                    'my': my,
+                    'mz': mz,
                 })
 
             return True
