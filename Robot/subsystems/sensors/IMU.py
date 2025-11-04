@@ -151,7 +151,7 @@ class IMU():
             self.state_estimator.predict(accel_meas=accel_arr, gyro_meas=gyro_arr)
         if magnetic is not None:
             mag_arr = np.asarray(magnetic, dtype=float)
-            mag_ref_world = np.array([0.0, 0.0, 1.0])
+            mag_ref_world = np.array([0.0, 0.0, -1.0])
             self.state_estimator.update_mag(mag_arr, mag_ref_world)
 
         with self._lock:
