@@ -55,6 +55,7 @@ class IMU():
             return tuple(self.acceleration)
     
     def get_mag(self) -> tuple:
+        # units are microteslas
         with self._lock:
             return tuple(self.magnetic)
 
@@ -131,8 +132,6 @@ class IMU():
                 mag_val = self.sensor.magnetic
             except Exception as e:
                 print(f"IMU Readings - Mag: {e}")
-                
-
         quat_val = self.sensor.quaternion
         # print(f"IMU Readings - Accel: {accel_val}, Gyro: {gyro_val}, Mag: {mag_val}, Quat: {quat_val}")
 

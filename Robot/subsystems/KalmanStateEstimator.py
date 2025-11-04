@@ -310,73 +310,70 @@ class KalmanStateEstimator:
         We predict mag in body frame: b_body = R.T @ mag_ref_world
         and compare to measured mag_meas.
 
-        Added: a simple plausibility check and diagnostic print for large innovations.
+        Uses direction-only comparison (unit vectors) to avoid magnitude/units mismatch
+        between the reference and raw magnetometer units (e.g., µT).
         """
         with self._lock:
+            # Normalize measurement to a unit vector (direction only)
+            mag_norm = np.linalg.norm(mag_meas)
+            if not np.isfinite(mag_norm) or mag_norm < 1e-6:
+                # bad sample
+                print(f"[KF update_mag] skipped - bad mag sample (norm={mag_norm})")
+                return
+            mag_meas_u = mag_meas / mag_norm
+
             q = quat_normalize(self.quat)
             R = quat_to_rotmat(q)
+            # predicted body-frame mag (may be any scale) -> normalize for direction
             b_pred = R.T @ mag_ref
+            b_pred_norm = np.linalg.norm(b_pred)
+            if not np.isfinite(b_pred_norm) or b_pred_norm < 1e-8:
+                print(f"[KF update_mag] skipped - predicted mag has invalid norm (b_pred_norm={b_pred_norm})")
+                return
+            b_pred_u = b_pred / b_pred_norm
 
+            # direction innovation
+            y = mag_meas_u - b_pred_u
+            y_norm = np.linalg.norm(y)
+
+            # Jacobian approximate using unit reference direction
             H = np.zeros((3, 15))
             def skew(v):
                 return np.array([[0, -v[2], v[1]], [v[2], 0, -v[0]], [-v[1], v[0], 0]])
+            mag_ref_u = mag_ref / (np.linalg.norm(mag_ref) + 1e-12)
+            H[:, 6:9] = -R.T @ skew(mag_ref_u)
 
-            H[:, 6:9] = -R.T @ skew(mag_ref)
+            # measurement covariance for unit-vector residuals (tunable)
+            # sigma_dir in radians (approx); e.g. 0.05 rad ~ 2.9 degrees
+            sigma_dir = 0.05
+            R_dir = np.eye(3) * (sigma_dir ** 2)
 
-            S = H @ self.P @ H.T + self.R_mag
+            S = H @ self.P @ H.T + R_dir
 
-            # raw innovation
-            y = mag_meas - b_pred
-            y_norm = np.linalg.norm(y)
-
-            # basic plausibility: reject obviously bogus magnetometer readings early
-            mag_norm = np.linalg.norm(mag_meas)
-            if not np.isfinite(mag_norm) or mag_norm <= 1e-6 or mag_norm > 2000.0:
-                print(f"[KF update_mag] Rejected mag sample (plausibility) mag_norm={mag_norm:.3e}, y_norm={y_norm:.3e}")
-                return
-
-            # Mahalanobis gating (optional; prevents HUGE updates from outliers)
+            # Mahalanobis gating
             try:
                 Sinv = np.linalg.inv(S)
             except np.linalg.LinAlgError:
-                print("[KF update_mag] S inversion failed, skipping mag update")
+                print("[KF update_mag] skipped - S inversion failed")
                 return
             d2 = float(y.T @ Sinv @ y)
             CHI2_3D_99 = 11.34
             if d2 > CHI2_3D_99:
-                print(f"[KF update_mag] Innovation gated out (d2={d2:.3f}, |y|={y_norm:.3f})")
+                # outlier
+                print(f"[KF update_mag] skipped - innovation gated (d2={d2:.3f}, |y|={y_norm:.3f})")
                 return
 
             K = self.P @ H.T @ Sinv
             dx = (K @ y).flatten()
 
-            # Protective clamps for the injected corrections (diagnostic + safety)
-            norm_dx = np.linalg.norm(dx)
-            if not np.isfinite(norm_dx) or norm_dx > 1e3:
-                print(f"[KF update_mag] large/infinite dx detected (|dx|={norm_dx:.3e}), clipping and injecting partial correction")
-                # clamp dtheta and dv and dp to safe limits
-                # dp clamp
-                dp = dx[0:3]
-                dpn = np.linalg.norm(dp)
-                if dpn > 100.0:
-                    dx[0:3] = dp * (100.0 / dpn)
-                # dv clamp
-                dv = dx[3:6]
-                dvn = np.linalg.norm(dv)
-                if dvn > 50.0:
-                    dx[3:6] = dv * (50.0 / dvn)
-                # dtheta clamp
-                dth = dx[6:9]
-                dthn = np.linalg.norm(dth)
-                if dthn > np.deg2rad(60.0):
-                    dx[6:9] = dth * (np.deg2rad(60.0) / dthn)
-
-            # print small diagnostic for moderate corrections (tune or remove in production)
-            if np.linalg.norm(dx) > 0.5:
-                print(f"[KF update_mag] injecting dx (|dx|={np.linalg.norm(dx):.3f}, |y|={y_norm:.3f}, d2={d2:.3f})")
+            # sanitize and apply
+            if not np.all(np.isfinite(dx)):
+                print(f"[KF update_mag] sanitized non-finite dx")
+                dx = np.nan_to_num(dx, nan=0.0, posinf=0.0, neginf=0.0)
 
             self._inject_error_state(dx)
 
+            # covariance update
             self.P = (np.eye(15) - K @ H) @ self.P
 
     def _inject_error_state(self, dx: np.ndarray):
