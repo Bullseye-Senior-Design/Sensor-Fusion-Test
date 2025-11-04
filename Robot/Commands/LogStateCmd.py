@@ -4,6 +4,7 @@ from structure.commands.Command import Command
 import csv
 import os
 import time
+import json
 from types import SimpleNamespace
 from pathlib import Path
 from typing import Optional
@@ -19,8 +20,16 @@ class LogDataCmd(Command):
         super().__init__()
         
     def initalize(self):
+        # record when logging begins and create a timestamped folder to hold all logs
         self.begin_timestamp = time.time()
-        print("LogDataCmd initialized, logging started.")
+        ts_str = time.strftime('%Y%m%d_%H%M%S', time.localtime(self.begin_timestamp))
+
+        # create a dedicated folder under ./logs/<begin_timestamp>/
+        base_log_dir = Path.cwd() / 'logs'
+        self.log_dir = base_log_dir / ts_str
+        self.log_dir.mkdir(parents=True, exist_ok=True)
+
+        print(f"LogDataCmd initialized, logging started. Logs will be stored in: {self.log_dir}")
     
     def execute(self):
         """Sample UWB positions, estimator state, and IMU orientation once and append to CSVs.
@@ -31,18 +40,16 @@ class LogDataCmd(Command):
         """
         ts = time.time()
 
-        # Ensure log directory
-        log_dir = Path.cwd() / 'logs'
-        log_dir.mkdir(parents=True, exist_ok=True)
-
-        # helper to create filenames stamped with the command begin timestamp
-        def _make_log_filename(base: str) -> str:
-            # use the begin timestamp if available so all files share same prefix
-            ts0 = getattr(self, 'begin_timestamp', None)
-            if ts0 is None:
-                ts0 = time.time()
+        # fallback: if execute is called before initalize, ensure a log dir exists
+        if not hasattr(self, 'log_dir'):
+            ts0 = getattr(self, 'begin_timestamp', time.time())
             ts_str = time.strftime('%Y%m%d_%H%M%S', time.localtime(ts0))
-            return str(log_dir / f"{base}_{ts_str}.csv")
+            self.log_dir = Path.cwd() / 'logs' / ts_str
+            self.log_dir.mkdir(parents=True, exist_ok=True)
+
+        # helper to create filenames inside the command's timestamped folder
+        def _make_log_filename(base: str, ext: str = 'csv') -> str:
+            return str(self.log_dir / f"{base}.{ext}")
 
         # 1) UWB positions
         try:
@@ -53,8 +60,17 @@ class LogDataCmd(Command):
             # take up to two positions (older code expected two)
             p1 = positions[0] if len(positions) > 0 else None
             p2 = positions[1] if len(positions) > 1 else None
-            uwb_file = _make_log_filename('uwb_positions')
+            uwb_file = _make_log_filename('uwb_positions', 'csv')
             self.save_uwb_pos_to_csv(p1, p2, uwb_file, timestamp=ts)
+
+            # Also record anchor information (text file) for debugging / reference
+            try:
+                if hasattr(uwb, 'get_latest_anchor_info'):
+                    anchors = uwb.get_latest_anchor_info()
+                    anchor_file = _make_log_filename('uwb_anchors', 'txt')
+                    self.save_uwb_anchors_to_txt(anchors, anchor_file, timestamp=ts)
+            except Exception as e:
+                print(f"UWB anchor save error: {e}")
         except Exception as e:
             print(f"UWB read error: {e}")
 
@@ -173,6 +189,33 @@ class LogDataCmd(Command):
             return True
         except Exception as e:
             print(f"Error saving orientation to CSV: {e}")
+            return False
+
+    def save_uwb_anchors_to_txt(self, anchors_info, filename: str, timestamp: Optional[float] = None) -> bool:
+        """Append the latest UWB anchor info to a text file as JSON per line.
+
+        anchors_info is expected to be the list returned by UWB.get_latest_anchor_info(),
+        typically a list of tuples (port, anchors) where anchors is a list or None.
+        """
+        try:
+            filename = str(filename)
+            file_exists = os.path.exists(filename)
+
+            with open(filename, 'a', newline='') as f:
+                # optionally write a small header when creating the file
+                if not file_exists:
+                    f.write('UWB Anchor Info Log\n')
+                    f.write('Each line is a JSON object: {"timestamp": <unix>, "port": <port>, "anchors": <anchors>}\n')
+
+                ts = timestamp if timestamp is not None else time.time()
+                # anchors_info is a list of (port, anchors)
+                for port, anchors in anchors_info:
+                    entry = {'timestamp': ts, 'port': port, 'anchors': anchors}
+                    f.write(json.dumps(entry) + '\n')
+
+            return True
+        except Exception as e:
+            print(f"Error saving UWB anchors to TXT: {e}")
             return False
 
     def save_state_to_csv(self, state, yaw: float, pitch: float, roll: float, filename: str, timestamp: Optional[float] = None) -> bool:

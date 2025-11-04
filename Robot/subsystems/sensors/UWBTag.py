@@ -353,6 +353,19 @@ class UWBTag:
         """Get the latest position reading"""
         with self.position_lock:
             return self.tag_info.position
+
+    def get_latest_anchor_info(self) -> Optional[List[Dict[str, Any]]]:
+        """Return the latest anchor information in a thread-safe way.
+
+        Returns a shallow copy of the anchors list (or None) while holding
+        the internal lock to avoid races with the read thread.
+        """
+        with self.position_lock:
+            anchors = self.tag_info.anchors
+            if anchors is None:
+                return None
+            # return a shallow copy so callers cannot mutate internal state
+            return [a.copy() for a in anchors]
         
     def print_anchor_info(self):
         """Print current anchor information"""

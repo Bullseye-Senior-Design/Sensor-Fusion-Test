@@ -1,4 +1,4 @@
-from typing import List, Tuple
+from typing import List, Tuple, Optional, Dict, Any
 from .UWBTag import UWBTag, Position
 import logging
 import threading
@@ -124,3 +124,19 @@ class UWB:
 
     def __len__(self) -> int:
         return len(self.tags)
+
+    def get_latest_anchor_info(self) -> List[Tuple[str, Optional[List[Dict[str, Any]]]]]:
+        """Return the latest anchor info for all tags.
+
+        Returns a list of tuples (port, anchors) where anchors is a shallow copy
+        of the anchors list from the tag or None if no anchors are available.
+        """
+        results: List[Tuple[str, Optional[List[Dict[str, Any]]]]] = []
+        for tag in self.tags:
+            try:
+                anchors = tag.get_latest_anchor_info()
+            except Exception:
+                logger.exception(f"Error reading anchors from {tag.port}")
+                anchors = None
+            results.append((tag.port, anchors))
+        return results
