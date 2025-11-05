@@ -243,16 +243,18 @@ class IMU():
         """
         def begin():
             while not self.sensor.calibrated:
+                self.sensor.calibration_status
+                sys, gyro, accel, mag = self.sensor.calibration_status
+                print(f"Calibration Status: System={sys}, Gyro={gyro}, Accel={accel}, Mag={mag}")
                 time.sleep(0.1)
-                print("IMU: waiting for sensor calibration...")
-            
-                accel_off = self.sensor.offsets_accelerometer
-                gyro_off = self.sensor.offsets_gyroscope
-                mag_off = self.sensor.offsets_magnetometer
-                print("IMU: Library Calibration Offsets:")
-                print("  Accelerometer offsets:", accel_off)
-                print("  Gyroscope offsets:", gyro_off) 
-                print("  Magnetometer offsets:", mag_off)
+                         
+            accel_off = self.sensor.offsets_accelerometer
+            gyro_off = self.sensor.offsets_gyroscope
+            mag_off = self.sensor.offsets_magnetometer
+            print("IMU: Library Calibration Offsets:")
+            print("  Accelerometer offsets:", accel_off)
+            print("  Gyroscope offsets:", gyro_off) 
+            print("  Magnetometer offsets:", mag_off)
         
         
         threading.Thread(target=begin, daemon=True).start()
