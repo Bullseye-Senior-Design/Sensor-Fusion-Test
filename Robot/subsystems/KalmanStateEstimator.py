@@ -302,3 +302,61 @@ class KalmanStateEstimator:
             self.x[10:13] = self.ba + dba
             # gyro bias
             self.x[13:16] = self.bg + dbg
+
+    def update_imu_attitude(self, q_meas: np.ndarray | None = None):
+        """EKF attitude update using an external IMU rotation estimate.
+
+        Provide either a quaternion q_meas = [qx,qy,qz,qw] or Euler angles
+        euler_rpy = [roll, pitch, yaw] in radians. The measurement residual is
+        the small-angle vector from the quaternion error:
+
+            q_err = q_meas ⊗ conj(q_est)  (ensure qw >= 0)
+            y ≈ 2 * q_err.xyz  (3x1)
+
+        The measurement Jacobian for the error-state is simply H = [0 0 I 0 0]
+        for the attitude block, making this a direct attitude observation.
+
+        Args:
+            q_meas: quaternion [qx,qy,qz,qw] (preferred).
+            euler_rpy: roll, pitch, yaw in radians (used if q_meas is None).
+            R_meas: 3x3 measurement covariance in rad^2. If None, defaults to
+                    diag([sigma^2, sigma^2, sigma^2]) with sigma = 0.05 rad (~2.9 deg).
+        """
+        if q_meas is None:
+            return
+
+        with self._lock:
+            q_est = quat_normalize(self.quat)
+
+            # quaternion conjugate (inverse for unit quaternion)
+            q_conj = np.array([-q_est[0], -q_est[1], -q_est[2], q_est[3]], dtype=float)
+            q_err = quat_mul(q_meas, q_conj)
+            # Make scalar part positive to keep smallest rotation
+            if q_err[3] < 0:
+                q_err = -q_err
+
+            # small-angle residual (3,)
+            y = 2.0 * q_err[0:3]
+            if not np.all(np.isfinite(y)):
+                return
+
+            # H selects the attitude error block
+            H = np.zeros((3, 15))
+            H[:, 6:9] = np.eye(3)
+
+            sigma = 0.05  # rad (~2.9 deg)
+            R_meas = np.eye(3) * (sigma ** 2)
+
+            S = H @ self.P @ H.T + R_meas
+            try:
+                Sinv = np.linalg.inv(S)
+            except np.linalg.LinAlgError:
+                return
+            K = self.P @ H.T @ Sinv
+
+            dx = (K @ y).flatten()
+            self._inject_error_state(dx)
+
+            # Joseph form for numerical stability
+            I = np.eye(15)
+            self.P = (I - K @ H) @ self.P @ (I - K @ H).T + K @ R_meas @ K.T
