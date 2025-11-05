@@ -49,6 +49,11 @@ class IMU():
         self.sensor.offsets_accelerometer = (-26, 32702, -50)
         self.sensor.offsets_gyroscope = (-1, -4, -1)
         self.sensor.offsets_magnetometer = (-839, -601, -413)
+        
+        print("IMU offset values: {}, {}, {}".format(
+            self.sensor.offsets_accelerometer,
+            self.sensor.offsets_gyroscope,
+            self.sensor.offsets_magnetometer))
 
         # Print any library-provided calibration info (if available)
         self.print_library_calibration()
