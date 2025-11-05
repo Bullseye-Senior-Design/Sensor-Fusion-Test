@@ -20,6 +20,21 @@ class MathUtil:
         R[2, 1] = 2 * (qy * qz + qx * qw)
         R[2, 2] = 1 - 2 * (qx * qx + qy * qy)
         return R
+    
+    @staticmethod
+    def quat_sensor_to_estimator(q_sensor: np.ndarray) -> np.ndarray:
+        """Convert sensor quaternion (w, x, y, z) to estimator order [qx,qy,qz,qw].
+
+        Many IMU libraries (e.g. Adafruit BNO055) return quaternions as (w,x,y,z).
+        This helper makes the conversion explicit and safe.
+        """
+        if q_sensor is None:
+            return np.array([0.0, 0.0, 0.0, 1.0], dtype=float)
+        try:
+            w, x, y, z = (0.0 if v is None else float(v) for v in q_sensor)
+        except Exception:
+            return np.array([0.0, 0.0, 0.0, 1.0], dtype=float)
+        return np.array([x, y, z, w], dtype=float)
 
     @staticmethod
     def quat_mul(q1: np.ndarray, q2: np.ndarray) -> np.ndarray:
