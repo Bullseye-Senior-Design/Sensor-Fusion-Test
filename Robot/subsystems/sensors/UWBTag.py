@@ -138,8 +138,6 @@ class UWBTag:
             line = self.serial_connection.readline()    
 
             response = line.decode('utf-8', errors='ignore').strip()    
-
-            print(response)
             
             # Parse position data
             # Expected output may contain DIST...ANx... and POS,x,y,z,quality
