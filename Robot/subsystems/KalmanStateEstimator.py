@@ -388,12 +388,12 @@ class KalmanStateEstimator:
             except np.linalg.LinAlgError:
                 print("[KF update_mag] skipped - S inversion failed")
                 return
-            d2 = float(y.T @ Sinv @ y)
-            CHI2_3D_99 = 11.34
-            if d2 > CHI2_3D_99:
-                # outlier
-                print(f"[KF update_mag] skipped - innovation gated (d2={d2:.3f}, |y|={y_norm:.3f})")
-                return
+            # d2 = float(y.T @ Sinv @ y)
+            # CHI2_3D_99 = 11.34
+            # if d2 > CHI2_3D_99:
+            #     # outlier
+            #     print(f"[KF update_mag] skipped - innovation gated (d2={d2:.3f}, |y|={y_norm:.3f})")
+            #     return
 
             K = self.P @ H.T @ Sinv
             dx = (K @ y).flatten()
