@@ -42,7 +42,9 @@ class PlotStateCmd(Command):
         self.ax = None
         self.line = None
         self.canvas = None
-        
+        # add a handle for the latest point
+        self.last_dot = None
+
         # top-down widgets
         self.ax_top = None
         self.truck_patch = None
@@ -83,6 +85,8 @@ class PlotStateCmd(Command):
 
         # initial empty line
         self.line, = self.ax.plot([], [], "b.-", markersize=4)
+        # green marker for the latest point
+        self.last_dot, = self.ax.plot([], [], "go", markersize=8, zorder=5)
 
         # UWB dots: red markers only (no connecting line)
         self.uwb_dots, = self.ax.plot([], [], "ro", markersize=5, linestyle="") 
@@ -167,6 +171,12 @@ class PlotStateCmd(Command):
         self.line.set_data(self.xs, self.ys) # type: ignore
         self.ax.relim() # type: ignore
         self.ax.autoscale_view() # type: ignore
+
+        # update latest point (green)
+        if self.xs and self.ys:
+            x_last, y_last = self.xs[-1], self.ys[-1]
+            if np.isfinite(x_last) and np.isfinite(y_last):
+                self.last_dot.set_data([x_last], [y_last])  # type: ignore
 
         # draw and process Tk events in a non-blocking way
         try:
