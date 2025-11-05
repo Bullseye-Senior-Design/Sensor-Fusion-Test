@@ -194,7 +194,7 @@ class PlotStateCmd(Command):
         if self.ax_top is not None:
             quat = self.estimator.quat
             euler = MathUtil.quat_to_euler(quat)
-            yaw = euler[0]
+            yaw = euler[2]
 
 
             # apply rotation to truck patches around origin
