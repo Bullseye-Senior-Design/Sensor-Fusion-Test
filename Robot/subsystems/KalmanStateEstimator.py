@@ -82,6 +82,26 @@ def quat_to_euler(q: np.ndarray) -> np.ndarray:
 
     return np.array([roll, pitch, yaw])
 
+def euler_to_quat(euler: np.ndarray) -> np.ndarray:
+    """Convert Euler angles (roll, pitch, yaw) to quaternion [qx, qy, qz, qw].
+
+    Assumes intrinsic rotations about x (roll), y (pitch), z (yaw) with the
+    same convention used by quat_to_euler.
+    """
+    roll, pitch, yaw = float(euler[0]), float(euler[1]), float(euler[2])
+    cr = np.cos(roll * 0.5)
+    sr = np.sin(roll * 0.5)
+    cp = np.cos(pitch * 0.5)
+    sp = np.sin(pitch * 0.5)
+    cy = np.cos(yaw * 0.5)
+    sy = np.sin(yaw * 0.5)
+
+    qw = cr * cp * cy + sr * sp * sy
+    qx = sr * cp * cy - cr * sp * sy
+    qy = cr * sp * cy + sr * cp * sy
+    qz = cr * cp * sy - sr * sp * cy
+    return quat_normalize(np.array([qx, qy, qz, qw], dtype=float))
+
 @dataclass
 class State:
     pos: Tuple[float, float, float]      # shape (3,)
@@ -210,76 +230,6 @@ class KalmanStateEstimator:
                 quat=tuple(self.x[6:10]),
             )
 
-    # Replace the existing predict, update_mag and _inject_error_state methods with these.
-
-    def predict(self, accel_meas: np.ndarray, gyro_meas: np.ndarray):
-        """Predict step using IMU measurements (body frame accel and angular rate).
-
-        accel_meas and gyro_meas are raw sensor readings (3,).
-        Added: diagnostics and a safety clamp for excessive world acceleration.
-        """
-        with self._lock:
-            dt = self.dt
-            # remove biases (copy biases under lock)
-            a = accel_meas - self.ba
-            w = gyro_meas - self.bg
-
-            # rotation matrix from body to world
-            q = quat_normalize(self.quat)
-            R = quat_to_rotmat(q)
-
-            # compute world acceleration
-            a_world = R @ a + GRAVITY
-            a_world_norm = np.linalg.norm(a_world)
-
-            # Diagnostic: detect huge world acceleration (possible quat/R or accel unit problem)
-            if not np.isfinite(a_world_norm) or a_world_norm > 100.0:
-                print(f"[KF predict] WARNING: large/invalid world accel |a_world|={a_world_norm:.3e}, a_body={a}, quat={q}")
-                # protect against NaNs or extremely large values by clamping
-                if not np.isfinite(a_world_norm):
-                    # don't use a_world if it's NaN/Inf: fallback to gravity only (stop integrating bogus accel)
-                    a_world = GRAVITY.copy()
-                else:
-                    # clamp magnitude while preserving direction
-                    a_world = a_world * (50.0 / a_world_norm)
-
-            # kinematic propagation
-            self.x[0:3] = self.pos + self.vel * dt + 0.5 * a_world * dt * dt
-            self.x[3:6] = self.vel + a_world * dt
-
-            # attitude update via small-angle approximation
-            dq = small_angle_quat(w * dt)
-            q_new = quat_mul(dq, q)
-            q_new = quat_normalize(q_new)
-            self.x[6:10] = q_new
-
-            # biases assumed constant (random walk)
-
-            # Discrete-time process noise
-            # Simple linearized F for error-state propagation (15x15)
-            F = np.zeros((15, 15))
-            # pos dot = vel
-            F[0:3, 3:6] = np.eye(3)
-            # vel depends on attitude and accel bias
-            ax = a
-            def skew(v):
-                return np.array([[0, -v[2], v[1]], [v[2], 0, -v[0]], [-v[1], v[0], 0]])
-
-            F[3:6, 6:9] = -R @ skew(ax)
-            F[3:6, 9:12] = -R  # partial w.r.t accel bias (in body frame)
-
-            # attitude error rate ~ -I * (w - bg)
-            F[6:9, 12:15] = -np.eye(3)
-
-            # Discretize: Phi = I + F*dt
-            Phi = np.eye(15) + F * dt
-
-            # Discrete Q
-            Qd = Phi @ (self.Qc * dt) @ Phi.T
-
-            # Covariance propagate
-            self.P = Phi @ self.P @ Phi.T + Qd
-
     def update_uwb_range(self, tag_pos_meas: np.ndarray, tag_offset: np.ndarray | None = None):
         """EKF update using the fused UWB tag world position (POS), not per-anchor ranges.
 
@@ -339,78 +289,6 @@ class KalmanStateEstimator:
             I = np.eye(15)
             self.P = (I - K @ H) @ self.P @ (I - K @ H).T + K @ R_meas @ K.T
 
-    def update_mag(self, mag_meas: np.ndarray, mag_ref: np.ndarray):
-        """Magnetometer vector measurement (body frame) with reference vector in world frame.
-
-        We predict mag in body frame: b_body = R.T @ mag_ref_world
-        and compare to measured mag_meas.
-
-        Uses direction-only comparison (unit vectors) to avoid magnitude/units mismatch
-        between the reference and raw magnetometer units (e.g., µT).
-        """
-        with self._lock:
-            # Normalize measurement to a unit vector (direction only)
-            mag_norm = np.linalg.norm(mag_meas)
-            if not np.isfinite(mag_norm) or mag_norm < 1e-6:
-                # bad sample
-                print(f"[KF update_mag] skipped - bad mag sample (norm={mag_norm})")
-                return
-            mag_meas_u = mag_meas / mag_norm
-
-            q = quat_normalize(self.quat)
-            R = quat_to_rotmat(q)
-            # predicted body-frame mag (may be any scale) -> normalize for direction
-            b_pred = R.T @ mag_ref
-            b_pred_norm = np.linalg.norm(b_pred)
-            if not np.isfinite(b_pred_norm) or b_pred_norm < 1e-8:
-                print(f"[KF update_mag] skipped - predicted mag has invalid norm (b_pred_norm={b_pred_norm})")
-                return
-            b_pred_u = b_pred / b_pred_norm
-
-            # direction innovation
-            y = mag_meas_u - b_pred_u
-            y_norm = np.linalg.norm(y)
-
-            # Jacobian approximate using unit reference direction
-            H = np.zeros((3, 15))
-            def skew(v):
-                return np.array([[0, -v[2], v[1]], [v[2], 0, -v[0]], [-v[1], v[0], 0]])
-            mag_ref_u = mag_ref / (np.linalg.norm(mag_ref) + 1e-12)
-            H[:, 6:9] = -R.T @ skew(mag_ref_u)
-
-            # measurement covariance for unit-vector residuals (tunable)
-            # sigma_dir in radians (approx); e.g. 0.05 rad ~ 2.9 degrees
-            sigma_dir = 0.05
-            R_dir = np.eye(3) * (sigma_dir ** 2)
-
-            S = H @ self.P @ H.T + R_dir
-
-            # Mahalanobis gating
-            try:
-                Sinv = np.linalg.inv(S)
-            except np.linalg.LinAlgError:
-                print("[KF update_mag] skipped - S inversion failed")
-                return
-            # d2 = float(y.T @ Sinv @ y)
-            # CHI2_3D_99 = 11.34
-            # if d2 > CHI2_3D_99:
-            #     # outlier
-            #     print(f"[KF update_mag] skipped - innovation gated (d2={d2:.3f}, |y|={y_norm:.3f})")
-            #     return
-
-            K = self.P @ H.T @ Sinv
-            dx = (K @ y).flatten()
-
-            # sanitize and apply
-            if not np.all(np.isfinite(dx)):
-                print(f"[KF update_mag] sanitized non-finite dx")
-                dx = np.nan_to_num(dx, nan=0.0, posinf=0.0, neginf=0.0)
-
-            self._inject_error_state(dx)
-
-            # covariance update
-            self.P = (np.eye(15) - K @ H) @ self.P
-
     def _inject_error_state(self, dx: np.ndarray):
         """Inject 15-vector error state into the full state x and renormalize quaternion.
 
@@ -449,3 +327,61 @@ class KalmanStateEstimator:
             self.x[10:13] = self.ba + dba
             # gyro bias
             self.x[13:16] = self.bg + dbg
+
+    def update_imu_attitude(self, q_meas: np.ndarray | None = None):
+        """EKF attitude update using an external IMU rotation estimate.
+
+        Provide either a quaternion q_meas = [qx,qy,qz,qw] or Euler angles
+        euler_rpy = [roll, pitch, yaw] in radians. The measurement residual is
+        the small-angle vector from the quaternion error:
+
+            q_err = q_meas ⊗ conj(q_est)  (ensure qw >= 0)
+            y ≈ 2 * q_err.xyz  (3x1)
+
+        The measurement Jacobian for the error-state is simply H = [0 0 I 0 0]
+        for the attitude block, making this a direct attitude observation.
+
+        Args:
+            q_meas: quaternion [qx,qy,qz,qw] (preferred).
+            euler_rpy: roll, pitch, yaw in radians (used if q_meas is None).
+            R_meas: 3x3 measurement covariance in rad^2. If None, defaults to
+                    diag([sigma^2, sigma^2, sigma^2]) with sigma = 0.05 rad (~2.9 deg).
+        """
+        if q_meas is None:
+            return
+
+        with self._lock:
+            q_est = quat_normalize(self.quat)
+
+            # quaternion conjugate (inverse for unit quaternion)
+            q_conj = np.array([-q_est[0], -q_est[1], -q_est[2], q_est[3]], dtype=float)
+            q_err = quat_mul(q_meas, q_conj)
+            # Make scalar part positive to keep smallest rotation
+            if q_err[3] < 0:
+                q_err = -q_err
+
+            # small-angle residual (3,)
+            y = 2.0 * q_err[0:3]
+            if not np.all(np.isfinite(y)):
+                return
+
+            # H selects the attitude error block
+            H = np.zeros((3, 15))
+            H[:, 6:9] = np.eye(3)
+
+            sigma = 0.05  # rad (~2.9 deg)
+            R_meas = np.eye(3) * (sigma ** 2)
+
+            S = H @ self.P @ H.T + R_meas
+            try:
+                Sinv = np.linalg.inv(S)
+            except np.linalg.LinAlgError:
+                return
+            K = self.P @ H.T @ Sinv
+
+            dx = (K @ y).flatten()
+            self._inject_error_state(dx)
+
+            # Joseph form for numerical stability
+            I = np.eye(15)
+            self.P = (I - K @ H) @ self.P @ (I - K @ H).T + K @ R_meas @ K.T
