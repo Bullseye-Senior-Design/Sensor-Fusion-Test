@@ -68,6 +68,21 @@ class KalmanStateEstimator:
         self.R_uwb_range = 0.1 ** 2  # 10 cm sigma default (variance)
         self.R_mag = np.eye(3) * (0.3 ** 2) / 12  # for mag direction residuals (tunable)
         
+        # --- accel protection parameters/state (added) ---
+        # maximum allowed linear acceleration magnitude (m/s^2)
+        self._max_acc = 30.0
+        # maximum allowed change in linear acceleration between samples (m/s^2)
+        self._max_delta_acc = 15.0
+        # how many consecutive bad accel samples before we consider accel invalid
+        self._accel_reject_threshold = 5
+        # last accepted linear acceleration (world frame)
+        self._last_accel = np.zeros(3)
+        # number of consecutive rejected accel samples
+        self._accel_reject_count = 0
+        # whether we've seen at least one valid accel sample
+        self._accel_valid = False
+        # --------------------------------------------------
+
         threading.Thread(target=self._run_loop, daemon=True).start()
 
     # --- Helpers to access parts of the full state
@@ -121,10 +136,11 @@ class KalmanStateEstimator:
           to get linear acceleration in world frame.
         - Integrates velocity and position with simple constant-acceleration kinematics.
         - Keeps the existing error-state covariance propagation.
-        Notes / assumptions:
-        - IMU.acceleration is assumed to include gravity (BNO055 .acceleration), so we
-          rotate to world frame and subtract GRAVITY to obtain linear acceleration.
-        - If accel is missing or non-finite, falls back to constant-velocity model.
+
+        Additional safety:
+        - Reject non-finite, implausibly large or spikey accel samples.
+        - After several consecutive rejections, fall back to constant-velocity
+          until a valid sample arrives.
         """
         # import IMU here to avoid circular import at module load time
         from Robot.subsystems.sensors.IMU import IMU
@@ -152,15 +168,45 @@ class KalmanStateEstimator:
                         a_w = R @ a_b
                         # subtract gravity (world frame)
                         a_lin = a_w - GRAVITY
-                        # safety clamp: avoid huge accelerations breaking the filter
-                        max_acc = 30.0  # m/s^2
+
+                        # Safety checks: magnitude and spike rejection
                         norm = np.linalg.norm(a_lin)
-                        if norm > max_acc:
-                            a_lin = a_lin * (max_acc / norm)
-                        a_world = a_lin
-                        use_accel = True
+                        if norm > self._max_acc:
+                            # magnitude implausible -> reject
+                            self._accel_reject_count += 1
+                        else:
+                            # if we have a previous valid accel, check delta spike
+                            if self._accel_valid:
+                                delta = np.linalg.norm(a_lin - self._last_accel)
+                                if delta > self._max_delta_acc:
+                                    # sudden spike -> reject
+                                    self._accel_reject_count += 1
+                                else:
+                                    # accept
+                                    use_accel = True
+                                    self._accel_reject_count = 0
+                            else:
+                                # no previous valid accel -> accept this as the first valid sample
+                                use_accel = True
+                                self._accel_reject_count = 0
+
+                        # If accepted, store for next-sample delta checks
+                        if use_accel:
+                            a_world = a_lin
+                            self._last_accel = a_lin.copy()
+                            self._accel_valid = True
+                        else:
+                            # If too many consecutive rejects, mark accel invalid and clear last accel
+                            if self._accel_reject_count >= self._accel_reject_threshold:
+                                self._accel_valid = False
+                                # optionally reset last accel to zero to avoid huge deltas when next valid arrives
+                                self._last_accel = np.zeros(3)
+                    else:
+                        # non-finite -> reject
+                        self._accel_reject_count += 1
                 except Exception:
-                    use_accel = False
+                    # parsing/shape error -> reject
+                    self._accel_reject_count += 1
 
             # Integrate full state using accel if available, else constant-velocity
             if use_accel:
