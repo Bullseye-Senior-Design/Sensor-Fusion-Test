@@ -12,6 +12,7 @@ from matplotlib import transforms as mtransforms
 from Robot.subsystems.KalmanStateEstimator import KalmanStateEstimator
 from Robot.subsystems.sensors.IMU import IMU
 from Robot.subsystems.sensors.UWB import UWB 
+from Robot.MathUtil import MathUtil
 
 
 class PlotStateCmd(Command):
@@ -191,8 +192,9 @@ class PlotStateCmd(Command):
 
         # update top-down yaw view (do this after drawing to avoid flicker)
         if self.ax_top is not None:
-            euler = self.imu.get_euler()
-            yaw = float(euler[0])
+            quat = self.estimator.quat
+            euler = MathUtil.quat_to_euler(quat)
+            yaw = euler[0]
 
 
             # apply rotation to truck patches around origin
