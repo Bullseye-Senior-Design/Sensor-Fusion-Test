@@ -26,7 +26,6 @@ class IMU():
         return cls._instance
 
     def _start(self):
-        
         i2c = board.I2C() # uses board.SCL and board.SDA
         self.sensor = adafruit_bno055.BNO055_I2C(i2c)
 
@@ -34,16 +33,25 @@ class IMU():
         self.gyro = (0.0, 0.0, 0.0)
         self.magnetic = (0.0, 0.0, 0.0)
         self.quat = (0.0, 0.0, 0.0, 0.0)
-        
+
+        # Reference magnetometer vector in world frame (can be adjusted or updated later)
+        self.mag_ref_world = np.array([0.0, 0.0, -1.0])
+
         self.interval = 0.01  # update interval in seconds
         self.mag_interval = self.interval * 5
         # timestamp of last magnetic sample
         self._last_mag_time = 0.0
-        
+
         # Protect concurrent access from update thread and callers
         self._lock = threading.RLock()
         self.state_estimator = KalmanStateEstimator()
-        
+
+        # Start initial calibration in background (non-blocking) and then start continuous update
+        # Calibration will write computed biases into the KalmanStateEstimator when done.
+        t = threading.Thread(target=self.initial_calibration, kwargs={"duration": 1.0, "sample_delay": 0.01}, daemon=True)
+        t.start()
+
+        # Start continuous update loop immediately (calibration runs in parallel)
         self.begin()
 
     def get_gyro(self) -> tuple:
@@ -117,6 +125,81 @@ class IMU():
         threading.Thread(target=_update_loop, daemon=True).start()
         
 
+    def _collect_samples_for_duration(self, read_fn, duration: float, sample_delay: float = 0.01):
+        """Collect samples from read_fn for `duration` seconds and return a numpy array (N x 3)."""
+        samples = []
+        end_t = time.time() + duration
+        while time.time() < end_t:
+            try:
+                v = read_fn()
+            except Exception:
+                v = None
+            if v is not None and all(x is not None for x in v):
+                try:
+                    arr = np.asarray(v, dtype=float)
+                    if arr.shape[0] >= 3:
+                        samples.append(arr[0:3])
+                except Exception:
+                    pass
+            time.sleep(sample_delay)
+        if samples:
+            return np.vstack(samples)
+        else:
+            return np.empty((0, 3), dtype=float)
+
+    def initial_calibration(self, duration: float, sample_delay: float):
+        """
+        Run a short calibration capturing gyro and accel while stationary (non-blocking).
+
+        - duration: total seconds to sample (default 1.0)
+        - sample_delay: seconds between sensor reads
+
+        Results:
+          - writes gyro bias into KalmanStateEstimator.bg (x[13:16])
+          - writes accel bias (simple magnitude correction) into KalmanStateEstimator.ba (x[10:13])
+
+        This function runs in a daemon thread (started from _start()) so it won't block the main loop.
+        """
+        try:
+            print(f"IMU: starting initial calibration for {duration:.2f}s (stationary) in background...")
+            # Collect gyro and accel samples directly from sensor
+            gyro_samples = self._collect_samples_for_duration(lambda: self.sensor.gyro, duration, sample_delay)
+            accel_samples = self._collect_samples_for_duration(lambda: self.sensor.acceleration, duration, sample_delay)
+
+            gyro_bias = np.zeros(3, dtype=float)
+            accel_bias = np.zeros(3, dtype=float)
+
+            if gyro_samples.size:
+                gyro_bias = np.mean(gyro_samples, axis=0)
+                print("IMU: computed gyro bias (will set in estimator) =", gyro_bias)
+            else:
+                print("IMU: no gyro samples collected during calibration; gyro bias left zeros")
+
+            if accel_samples.size:
+                mean_acc = np.mean(accel_samples, axis=0)
+                g_val = 9.80665
+                mean_norm = np.linalg.norm(mean_acc)
+                if mean_norm > 1e-6:
+                    # simple magnitude correction: compute bias so corrected mean has magnitude g
+                    scale = g_val / mean_norm
+                    corrected = mean_acc * scale
+                    accel_bias = mean_acc - corrected
+                    print("IMU: computed accel bias (will set in estimator) =", accel_bias, " mean_acc=", mean_acc)
+                else:
+                    print("IMU: accel mean magnitude too small; accel bias left zeros")
+            else:
+                print("IMU: no accel samples collected during calibration; accel bias left zeros")
+
+            # Write biases into KalmanStateEstimator using its public setter (thread-safe)
+            try:
+                # prefer using the estimator's API rather than touching internal arrays
+                self.state_estimator.set_biases(accel_bias, gyro_bias)
+                print("IMU: biases written to KalmanStateEstimator (ba, bg).")
+            except Exception as e:
+                print("IMU: failed to write biases to estimator:", e)
+        except Exception as e:
+            print("IMU: calibration exception:", e)
+
     def update(self):
         # continuous update loop; keep reads outside lock and assign under lock
         accel: Optional[Tuple[float, float, float]] = None
@@ -145,14 +228,21 @@ class IMU():
         if all(v is not None for v in quat_val):
             quat = quat_val # type: ignore
 
-        if accel is not None and gyro is not None:
+        # NOTE: biases are stored in the KalmanStateEstimator (x[10:13] = ba, x[13:16] = bg).
+        # The estimator's predict() method subtracts those biases, so we pass raw measurements here.
+        accel_arr: Optional[np.ndarray] = None
+        gyro_arr: Optional[np.ndarray] = None
+        if accel is not None:
             accel_arr = np.asarray(accel, dtype=float)
+        if gyro is not None:
             gyro_arr = np.asarray(gyro, dtype=float)
+
+        if accel_arr is not None and gyro_arr is not None:
             self.state_estimator.predict(accel_meas=accel_arr, gyro_meas=gyro_arr)
         if magnetic is not None:
             mag_arr = np.asarray(magnetic, dtype=float)
-            mag_ref_world = np.array([0.0, 0.0, -1.0])
-            self.state_estimator.update_mag(mag_arr, mag_ref_world)
+            # use instance mag_ref_world (set during _start, can be changed later)
+            self.state_estimator.update_mag(mag_arr, self.mag_ref_world)
 
         with self._lock:
             if accel is not None:

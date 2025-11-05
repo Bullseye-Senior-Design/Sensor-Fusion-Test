@@ -169,6 +169,38 @@ class KalmanStateEstimator:
     def bg(self) -> np.ndarray:
         with self._lock:
             return self.x[13:16].copy()
+
+    # --- Thread-safe setters for biases
+    def set_biases(self, ba: np.ndarray, bg: np.ndarray) -> None:
+        """Thread-safe set of accel bias (ba) and gyro bias (bg).
+
+        ba, bg: 3-element array-like each. Stores into internal full-state layout:
+          - ba -> self.x[10:13]
+          - bg -> self.x[13:16]
+        """
+        ba_arr = np.asarray(ba, dtype=float).flatten()
+        bg_arr = np.asarray(bg, dtype=float).flatten()
+        if ba_arr.shape != (3,) or bg_arr.shape != (3,):
+            raise ValueError("ba and bg must be 3-element vectors")
+        with self._lock:
+            self.x[10:13] = ba_arr
+            self.x[13:16] = bg_arr
+
+    def set_accel_bias(self, ba: np.ndarray) -> None:
+        """Set accel bias (ba) only."""
+        ba_arr = np.asarray(ba, dtype=float).flatten()
+        if ba_arr.shape != (3,):
+            raise ValueError("ba must be a 3-element vector")
+        with self._lock:
+            self.x[10:13] = ba_arr
+
+    def set_gyro_bias(self, bg: np.ndarray) -> None:
+        """Set gyro bias (bg) only."""
+        bg_arr = np.asarray(bg, dtype=float).flatten()
+        if bg_arr.shape != (3,):
+            raise ValueError("bg must be a 3-element vector")
+        with self._lock:
+            self.x[13:16] = bg_arr
     
     def get_state(self) -> State:
         with self._lock:

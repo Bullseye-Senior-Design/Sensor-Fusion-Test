@@ -1,3 +1,4 @@
+from typing import Tuple
 from structure.commands.Command import Command
 
 import tkinter as tk
@@ -10,6 +11,7 @@ from matplotlib import transforms as mtransforms
 
 from Robot.subsystems.KalmanStateEstimator import KalmanStateEstimator
 from Robot.subsystems.sensors.IMU import IMU
+from Robot.subsystems.sensors.UWB import UWB 
 
 
 class PlotStateCmd(Command):
@@ -30,6 +32,10 @@ class PlotStateCmd(Command):
         self.xs = []
         self.ys = []
 
+        # UWB fused positions (plotted as dots)
+        self.uwb_xs = []        # <-- ADDED
+        self.uwb_ys = []        # <-- ADDED
+
         # GUI objects
         self.root = None
         self.figure = None
@@ -45,6 +51,7 @@ class PlotStateCmd(Command):
         # estimator instance
         self.estimator = KalmanStateEstimator()
         self.imu = IMU()
+        self.uwb = UWB()   # <-- ADDED: singleton UWB interface
 
     def initalize(self):
         # Create Tk window and Matplotlib canvas. We do NOT call mainloop;
@@ -76,6 +83,9 @@ class PlotStateCmd(Command):
 
         # initial empty line
         self.line, = self.ax.plot([], [], "b.-", markersize=4)
+
+        # UWB dots: red markers only (no connecting line)
+        self.uwb_dots, = self.ax.plot([], [], "ro", markersize=5, linestyle="") 
 
         # top-down yaw view on right
         self.ax_top = self.figure.add_subplot(gs[0, 1])
@@ -171,8 +181,8 @@ class PlotStateCmd(Command):
 
         # update top-down yaw view (do this after drawing to avoid flicker)
         if self.ax_top is not None:
-            euler = self.imu.get_euler()  # [roll, pitch, yaw]
-            yaw = float(euler[2])
+            euler = self.imu.get_euler()
+            yaw = float(euler[0])
 
 
             # apply rotation to truck patches around origin
@@ -189,6 +199,32 @@ class PlotStateCmd(Command):
             except Exception:
                 if self.yaw_text is not None:
                     self.yaw_text.set_text("Yaw: --\N{DEGREE SIGN}")
+
+        # ADDED: update UWB dot positions from the UWB subsystem
+        uwb_positions = self.uwb.get_positions()  # iterable of positions (objects or sequences)
+
+        # collect all reported UWB x/y values into lists (mutable)
+        uwb_x_list = []
+        uwb_y_list = []
+        for uwb_pos in uwb_positions:
+            # prefer attribute access (uwb_pos.x, uwb_pos.y)
+            ux = float(uwb_pos.x)
+            uy = float(uwb_pos.y)
+
+            uwb_x_list.append(ux)
+            uwb_y_list.append(uy)
+
+        # if we have any valid UWB samples, compute their mean and plot
+        if uwb_x_list:
+            uwb_x = sum(uwb_x_list) / len(uwb_x_list)
+            uwb_y = sum(uwb_y_list) / len(uwb_y_list)
+            self.uwb_xs.append(uwb_x)
+            self.uwb_ys.append(uwb_y)
+            if len(self.uwb_xs) > self.max_points:
+                self.uwb_xs = self.uwb_xs[-self.max_points :]
+                self.uwb_ys = self.uwb_ys[-self.max_points :]
+            # update uwb_dots data
+            self.uwb_dots.set_data(self.uwb_xs, self.uwb_ys) # type: ignore
 
     def end(self, interrupted):
         # close window and cleanup
