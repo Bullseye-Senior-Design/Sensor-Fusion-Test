@@ -268,22 +268,30 @@ class UWBTag:
         def read_loop():
             while self.is_reading:
                 anchors, position = self.get_location_data()
-                for anchor in anchors or []:
-                    # convert optional tuple tag_offset to numpy array to satisfy estimator API
-                    self.state_estimator.update_uwb_range(anchor['position'], anchor['range'], np.array(self.tag_offset))
-                
-                # store anchors if provided
+
+                # store anchors if provided (for diagnostics/visualization only)
                 if anchors:
                     self.tag_info.anchors = anchors
-                    if debug:   
+                    if debug:
                         self.print_anchor_info()
 
+                # Use fused POS (world) position for EKF update instead of per-anchor ranges
                 if position:
                     with self.position_lock:
                         self.tag_info.position = position
+
+                    # Build measurement vector and optional tag offset
+                    tag_pos_meas = np.array([position.x, position.y, position.z], dtype=float)
+                    tag_offset_vec = None if self.tag_offset is None else np.array(self.tag_offset, dtype=float)
+
+                    try:
+                        self.state_estimator.update_uwb_range(tag_pos_meas, tag_offset=tag_offset_vec)
+                    except Exception as e:
+                        logger.debug(f"EKF UWB POS update skipped: {e}")
+
                     if debug:
                         self.print_position(position)
-                
+
                 time.sleep(interval) # TODO check if needed
         
         self.read_thread = threading.Thread(target=read_loop, daemon=True)

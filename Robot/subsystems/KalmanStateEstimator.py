@@ -280,61 +280,64 @@ class KalmanStateEstimator:
             # Covariance propagate
             self.P = Phi @ self.P @ Phi.T + Qd
 
-    def update_uwb_range(self, anchor_pos: np.ndarray, range_meas: float, tag_offset: np.ndarray | None = None):
-        """UWB range measurement to known anchor position in world frame.
+    def update_uwb_range(self, tag_pos_meas: np.ndarray, tag_offset: np.ndarray | None = None):
+        """EKF update using the fused UWB tag world position (POS), not per-anchor ranges.
+
+        Measurement model:
+            z (3x1) = h(x) + v,  h(x) = p + R(q) @ o_b
+        where
+            p is robot position in world (state),
+            R(q) is body->world rotation from quaternion,
+            o_b is tag offset in body frame (default 0),
+            v ~ N(0, R_meas).
 
         Args:
-            anchor_pos: 3D position of UWB anchor in world frame (3,)
-            range_meas: measured range (scalar) from tag to anchor
-            tag_offset: 3D offset of UWB tag from robot center in body frame (3,)
-                    If None, assumes tag is at robot center
+            tag_pos_meas: (3,) measured tag position in world frame [m]
+            tag_offset:   (3,) tag offset in body frame from robot center [m]; None => [0,0,0]
         """
         with self._lock:
-            z = range_meas
-            
-            # Get current rotation matrix to transform body frame to world frame
+            z = np.asarray(tag_pos_meas, dtype=float).reshape(3)
+            if not np.all(np.isfinite(z)):
+                return
+
+            o_b = np.zeros(3) if tag_offset is None else np.asarray(tag_offset, dtype=float).reshape(3)
+
+            # rotation matrix from body to world
             q = quat_normalize(self.quat)
             R = quat_to_rotmat(q)
-            
-            # Calculate tag position in world frame
-            # tag_pos_world = robot_pos + R @ tag_offset_body
-            if tag_offset is not None:
-                tag_pos_world = self.pos + R @ tag_offset
-            else:
-                tag_pos_world = self.pos
-            
-            # Predicted range from tag to anchor
-            diff = tag_pos_world - anchor_pos
-            h = np.linalg.norm(diff)
-            if h < 1e-8:
-                return
-            
-            # Measurement Jacobian H (1x15) wrt error-state [pos, vel, att, ba, bg]
-            H = np.zeros((1, 15))
-            
-            # Partial derivative w.r.t position: d(range)/d(pos) = diff / h
-            H[0, 0:3] = diff / h
-            
-            # Partial derivative w.r.t attitude (due to tag offset rotation)
-            if tag_offset is not None:
-                def skew(v):
-                    return np.array([[0, -v[2], v[1]], [v[2], 0, -v[0]], [-v[1], v[0], 0]])
-                
-                # d(tag_pos)/d(theta) = d(R @ tag_offset)/d(theta) = R @ [tag_offset]_x
-                # d(range)/d(theta) = (diff/h)^T @ d(tag_pos)/d(theta)
-                H[0, 6:9] = (diff / h) @ R @ skew(tag_offset)
 
-            S = H @ self.P @ H.T + self.R_uwb_range
-            K = (self.P @ H.T) / S
-
+            # prediction h(x)
+            h = self.pos + R @ o_b
             y = z - h
-            dx = (K * y).flatten()
+
+            # Jacobian H (3x15): [ I3  03  R[o]_x  03  03 ]
+            H = np.zeros((3, 15))
+            H[:, 0:3] = np.eye(3)
+
+            if np.any(o_b):
+                def skew(v):
+                    return np.array([[0, -v[2], v[1]],
+                                     [v[2], 0, -v[0]],
+                                     [-v[1], v[0], 0]])
+                H[:, 6:9] = R @ skew(o_b)
+
+            R_meas = np.eye(3) * self.R_uwb_range
+
+            S = H @ self.P @ H.T + R_meas
+            try:
+                Sinv = np.linalg.inv(S)
+            except np.linalg.LinAlgError:
+                return
+            K = self.P @ H.T @ Sinv
+
+            dx = (K @ y).flatten()
 
             # inject and update P under lock
             self._inject_error_state(dx)
 
-            # Joseph form
-            self.P = (np.eye(15) - K @ H) @ self.P @ (np.eye(15) - K @ H).T + K * self.R_uwb_range * K.T
+            # Joseph form for numerical stability
+            I = np.eye(15)
+            self.P = (I - K @ H) @ self.P @ (I - K @ H).T + K @ R_meas @ K.T
 
     def update_mag(self, mag_meas: np.ndarray, mag_ref: np.ndarray):
         """Magnetometer vector measurement (body frame) with reference vector in world frame.
