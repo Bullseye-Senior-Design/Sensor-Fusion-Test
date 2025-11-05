@@ -243,8 +243,11 @@ class IMU():
         """
         def begin():
             while not self.sensor.calibrated:
-                time.sleep(1.0)
-            
+                self.sensor.calibration_status
+                sys, gyro, accel, mag = self.sensor.calibration_status
+                print(f"Calibration Status: System={sys}, Gyro={gyro}, Accel={accel}, Mag={mag}")
+                time.sleep(0.1)
+                            
             accel_off = self.sensor.offsets_accelerometer
             gyro_off = self.sensor.offsets_gyroscope
             mag_off = self.sensor.offsets_magnetometer
