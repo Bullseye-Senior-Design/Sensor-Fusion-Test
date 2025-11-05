@@ -55,6 +55,9 @@ class IMU():
         # runs as a daemon thread and returns immediately
         self.calibrate_mag_ref(duration=20.0, sample_delay=0.05, run_async=True)
 
+        # Print any library-provided calibration info (if available)
+        self.print_library_calibration()
+
         # Start continuous update loop immediately (calibration runs in parallel)
         self.begin()
 
@@ -230,6 +233,28 @@ class IMU():
         else:
             _calibrate()
             return None
+
+    def print_library_calibration(self) -> None:
+        """Read and print calibration information from the underlying sensor library (if present).
+
+        This tries several common attributes/methods found on Adafruit BNO055 wrappers and
+        prints whatever calibration/status/offset information is available. It is safe
+        to call even if the sensor object doesn't expose these fields.
+        """
+        def begin():
+            while not self.sensor.calibrated:
+                time.sleep(1.0)
+            
+            accel_off = self.sensor.offsets_accelerometer
+            gyro_off = self.sensor.offsets_gyroscope
+            mag_off = self.sensor.offsets_magnetometer
+            print("IMU: Library Calibration Offsets:")
+            print("  Accelerometer offsets:", accel_off)
+            print("  Gyroscope offsets:", gyro_off) 
+            print("  Magnetometer offsets:", mag_off)
+        
+        
+        threading.Thread(target=begin, daemon=True).start()
 
     def initial_calibration(self, duration: float, sample_delay: float):
         """
