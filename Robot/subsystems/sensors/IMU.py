@@ -184,14 +184,6 @@ class IMU():
         if all(v is not None for v in quat_val):
             quat = quat_val # type: ignore
 
-        # NOTE: biases are stored in the KalmanStateEstimator (x[10:13] = ba, x[13:16] = bg).
-        # The estimator's predict() method subtracts those biases, so we pass raw measurements here.
-        # accel_arr: Optional[np.ndarray] = None
-        # gyro_arr: Optional[np.ndarray] = None
-        # if accel is not None:
-        #     accel_arr = np.asarray(accel, dtype=float)
-        # if gyro is not None:
-        #     gyro_arr = np.asarray(gyro, dtype=float)
         if quat is not None:
             quat_arr = np.asarray(quat, dtype=float)
             # convert sensor quaternion (w, x, y, z) to estimator order [qx,qy,qz,qw]

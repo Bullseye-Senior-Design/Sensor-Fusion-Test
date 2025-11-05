@@ -114,19 +114,65 @@ class KalmanStateEstimator:
     # Replace the existing predict, update_mag and _inject_error_state methods with these.
 
     def predict(self):
-        """Predict step using IMU measurements (body frame accel and angular rate).
+        """Predict step using IMU acceleration (body frame) when available.
 
-        accel_meas and gyro_meas are raw sensor readings (3,).
-        Added: diagnostics and a safety clamp for excessive world acceleration.
+        - Reads accel from the IMU singleton (IMU().get_accel()).
+        - Converts accel to world frame using current quaternion, subtracts GRAVITY
+          to get linear acceleration in world frame.
+        - Integrates velocity and position with simple constant-acceleration kinematics.
+        - Keeps the existing error-state covariance propagation.
+        Notes / assumptions:
+        - IMU.acceleration is assumed to include gravity (BNO055 .acceleration), so we
+          rotate to world frame and subtract GRAVITY to obtain linear acceleration.
+        - If accel is missing or non-finite, falls back to constant-velocity model.
         """
-        # Modified predict: do not use accel or gyro measurements. Assume constant linear velocity model.
+        # import IMU here to avoid circular import at module load time
+        from Robot.subsystems.sensors.IMU import IMU
+
         with self._lock:
             dt = self.dt
 
-            # simple constant-velocity kinematic propagation
-            self.x[0:3] = self.pos + self.vel * dt
-            # velocity assumed constant (no accel integration)
-            self.x[3:6] = self.vel
+            # Try to get accelerometer reading from IMU singleton
+            accel_tuple = None
+            try:
+                accel_tuple = IMU().get_accel()
+            except Exception:
+                accel_tuple = None
+
+            use_accel = False
+            a_world = np.zeros(3)
+
+            if accel_tuple is not None:
+                try:
+                    a_b = np.asarray(accel_tuple, dtype=float).reshape(3)
+                    if np.all(np.isfinite(a_b)):
+                        # rotate accel to world frame and remove gravity to get linear acceleration
+                        q = MathUtil.quat_normalize(self.quat)
+                        R = MathUtil.quat_to_rotmat(q)  # body->world
+                        a_w = R @ a_b
+                        # subtract gravity (world frame)
+                        a_lin = a_w - GRAVITY
+                        # safety clamp: avoid huge accelerations breaking the filter
+                        max_acc = 30.0  # m/s^2
+                        norm = np.linalg.norm(a_lin)
+                        if norm > max_acc:
+                            a_lin = a_lin * (max_acc / norm)
+                        a_world = a_lin
+                        use_accel = True
+                except Exception:
+                    use_accel = False
+
+            # Integrate full state using accel if available, else constant-velocity
+            if use_accel:
+                # kinematic propagation with constant acceleration over dt
+                # pos = pos + v*dt + 0.5*a*dt^2
+                self.x[0:3] = self.pos + self.vel * dt + 0.5 * a_world * (dt ** 2)
+                # vel = vel + a*dt
+                self.x[3:6] = self.vel + a_world * dt
+            else:
+                # fallback: constant velocity (no accel)
+                self.x[0:3] = self.pos + self.vel * dt
+                self.x[3:6] = self.vel
 
             # Linearized F for error-state propagation (9x9) with pos <- vel coupling
             F = np.zeros((9, 9))
