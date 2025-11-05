@@ -128,8 +128,6 @@ class KalmanStateEstimator:
             # velocity assumed constant (no accel integration)
             self.x[3:6] = self.vel
 
-            # attitude left unchanged (we do not integrate gyro here)
-
             # Linearized F for error-state propagation (9x9) with pos <- vel coupling
             F = np.zeros((9, 9))
             F[0:3, 3:6] = np.eye(3)

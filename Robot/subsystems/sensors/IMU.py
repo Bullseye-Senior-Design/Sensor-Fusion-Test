@@ -10,7 +10,7 @@ import math
 import numpy as np
 import time
 from typing import Optional, Tuple
-from Robot.subsystems.KalmanStateEstimator import KalmanStateEstimator 
+from Robot.subsystems.KalmanStateEstimator import KalmanStateEstimator, quat_sensor_to_estimator
 
 
 class IMU():
@@ -188,8 +188,13 @@ class IMU():
         #     gyro_arr = np.asarray(gyro, dtype=float)
         if quat is not None:
             quat_arr = np.asarray(quat, dtype=float)
+            # convert sensor quaternion (w, x, y, z) to estimator order [qx,qy,qz,qw]
+            try:
+                q_est = quat_sensor_to_estimator(quat_arr)
+            except Exception:
+                q_est = quat_arr
             # update attitude in KalmanStateEstimator
-            self.state_estimator.update_imu_attitude(q_meas=quat_arr)
+            self.state_estimator.update_imu_attitude(q_meas=q_est)
 
         # if accel_arr is not None and gyro_arr is not None:
         #     self.state_estimator.predict(accel_meas=accel_arr, gyro_meas=gyro_arr)
