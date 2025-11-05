@@ -429,8 +429,8 @@ class KalmanStateEstimator:
             dba = dx[9:12]
             dbg = dx[12:15]
 
-            if np.linalg.norm(dx) > 1.0:
-                print(f"[KF _inject_error_state] Large injection: |dx|={np.linalg.norm(dx):.3f} dp={dp} dv={dv} dtheta={dtheta}")
+            # if np.linalg.norm(dx) > 1.0:
+            #     print(f"[KF _inject_error_state] Large injection: |dx|={np.linalg.norm(dx):.3f} dp={dp} dv={dv} dtheta={dtheta}")
 
             # pos
             self.x[0:3] = self.pos + dp
