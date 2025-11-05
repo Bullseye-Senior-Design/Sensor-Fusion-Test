@@ -249,54 +249,6 @@ class UWBTag:
             logger.error(f"Error parsing position data: {e}")
             return None, None
     
-    def get_node_info(self) -> Dict[str, Any]:
-        """
-        Get node information from the tag
-        
-        Returns:
-            Dictionary containing node information
-        """
-        if not self.is_connected or not self.serial_connection:
-            logger.error("Not connected to DWM1001-DEV")
-            return {}
-        
-        info = {}
-        
-        try:
-            # Get node ID
-            self.serial_connection.write(b'si\r')  # System Info
-            time.sleep(1)
-            response = self.serial_connection.readline().decode('utf-8', errors='ignore').strip()
-            # Parse system info
-            if 'node_id' in response.lower():
-                # Extract node ID from response
-                parts = response.split()
-                for i, part in enumerate(parts):
-                    if 'node_id' in part.lower() and i + 1 < len(parts):
-                        info['node_id'] = parts[i + 1]
-                        self.tag_info.node_id = parts[i + 1]
-                        break
-            
-            # Get update rate
-            self.serial_connection.write(b'pur\r')  # Position Update Rate
-            time.sleep(1)
-            response = self.serial_connection.readline().decode('utf-8', errors='ignore').strip()
-            
-            if 'upd' in response.lower():
-                # Parse update rate
-                try:
-                    rate = int(''.join(filter(str.isdigit, response)))
-                    info['update_rate'] = rate
-                    self.tag_info.update_rate = rate
-                except ValueError:
-                    pass
-            
-            return info
-            
-        except Exception as e:
-            logger.error(f"Error getting node info: {e}")
-            return {}
-    
     def start_continuous_reading(self, interval: float = 0.1, debug: bool = False):
         """
         Start continuous position reading in a separate thread
