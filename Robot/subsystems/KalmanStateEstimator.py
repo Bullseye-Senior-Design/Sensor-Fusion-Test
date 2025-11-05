@@ -84,6 +84,26 @@ def quat_to_euler(q: np.ndarray) -> np.ndarray:
 
     return np.array([roll, pitch, yaw])
 
+def euler_to_quat(euler: np.ndarray) -> np.ndarray:
+    """Convert Euler angles (roll, pitch, yaw) to quaternion [qx, qy, qz, qw].
+
+    Assumes intrinsic rotations about x (roll), y (pitch), z (yaw) with the
+    same convention used by quat_to_euler.
+    """
+    roll, pitch, yaw = float(euler[0]), float(euler[1]), float(euler[2])
+    cr = np.cos(roll * 0.5)
+    sr = np.sin(roll * 0.5)
+    cp = np.cos(pitch * 0.5)
+    sp = np.sin(pitch * 0.5)
+    cy = np.cos(yaw * 0.5)
+    sy = np.sin(yaw * 0.5)
+
+    qw = cr * cp * cy + sr * sp * sy
+    qx = sr * cp * cy - cr * sp * sy
+    qy = cr * sp * cy + sr * cp * sy
+    qz = cr * cp * sy - sr * sp * cy
+    return quat_normalize(np.array([qx, qy, qz, qw], dtype=float))
+
 @dataclass
 class State:
     pos: Tuple[float, float, float]      # shape (3,)
@@ -276,4 +296,9 @@ class KalmanStateEstimator:
             dq = small_angle_quat(dtheta)
             q = self.quat
             q_new = quat_mul(dq, q)
-            self.x[6:10] = quat_normalize(q_new)
+            q_new = quat_normalize(q_new)
+            self.x[6:10] = q_new
+            # accel bias
+            self.x[10:13] = self.ba + dba
+            # gyro bias
+            self.x[13:16] = self.bg + dbg

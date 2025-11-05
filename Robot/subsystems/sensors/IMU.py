@@ -180,16 +180,23 @@ class IMU():
 
         # NOTE: biases are stored in the KalmanStateEstimator (x[10:13] = ba, x[13:16] = bg).
         # The estimator's predict() method subtracts those biases, so we pass raw measurements here.
-        accel_arr: Optional[np.ndarray] = None
-        gyro_arr: Optional[np.ndarray] = None
-        if accel is not None:
-            accel_arr = np.asarray(accel, dtype=float)
-        if gyro is not None:
-            gyro_arr = np.asarray(gyro, dtype=float)
-
+        # accel_arr: Optional[np.ndarray] = None
+        # gyro_arr: Optional[np.ndarray] = None
+        # if accel is not None:
+        #     accel_arr = np.asarray(accel, dtype=float)
+        # if gyro is not None:
+        #     gyro_arr = np.asarray(gyro, dtype=float)
         if quat is not None:
             quat_arr = np.asarray(quat, dtype=float)
-            # self.state_estimator.set_quat(quat_arr)
+            # update attitude in KalmanStateEstimator
+            self.state_estimator.update_imu_attitude(q_meas=quat_arr)
+
+        # if accel_arr is not None and gyro_arr is not None:
+        #     self.state_estimator.predict(accel_meas=accel_arr, gyro_meas=gyro_arr)
+        # if magnetic is not None:
+        #     mag_arr = np.asarray(magnetic, dtype=float)
+        #     # use instance mag_ref_world (set during _start, can be changed later)
+        #     self.state_estimator.update_mag(mag_arr, self.mag_ref_world)
 
         with self._lock:
             if accel is not None:
