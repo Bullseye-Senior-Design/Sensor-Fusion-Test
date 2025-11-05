@@ -25,7 +25,6 @@ GRAVITY = np.array([0.0, 0.0, -9.80665])
 def quat_normalize(q: np.ndarray) -> np.ndarray:
     return q / np.linalg.norm(q)
 
-
 def quat_to_rotmat(q: np.ndarray) -> np.ndarray:
     # q = [qx, qy, qz, qw]
     qx, qy, qz, qw = q
@@ -150,6 +149,8 @@ class KalmanStateEstimator:
         # Measurement noise templates
         self.R_uwb_range = 0.1 ** 2  # 10 cm sigma default (variance)
         self.R_mag = np.eye(3) * (0.3 ** 2) / 12  # for mag direction residuals (tunable)
+        
+        threading.Thread(target=self._run_loop, daemon=True).start()
 
     # --- Helpers to access parts of the full state
     @property
@@ -180,10 +181,21 @@ class KalmanStateEstimator:
                 vel=tuple(self.x[3:6]),
                 quat=tuple(self.x[6:10]),
             )
+    
+    def _run_loop(self):
+        """Background thread to run predict at fixed dt intervals."""
+        import time
+        next_time = time.time()
+        while True:
+            next_time += self.dt
+            self.predict()
+            sleep_duration = next_time - time.time()
+            if sleep_duration > 0:
+                time.sleep(sleep_duration)
 
     # Replace the existing predict, update_mag and _inject_error_state methods with these.
 
-    def predict(self, accel_meas: np.ndarray, gyro_meas: np.ndarray):
+    def predict(self):
         """Predict step using IMU measurements (body frame accel and angular rate).
 
         accel_meas and gyro_meas are raw sensor readings (3,).
@@ -298,10 +310,6 @@ class KalmanStateEstimator:
             q_new = quat_mul(dq, q)
             q_new = quat_normalize(q_new)
             self.x[6:10] = q_new
-            # accel bias
-            self.x[10:13] = self.ba + dba
-            # gyro bias
-            self.x[13:16] = self.bg + dbg
 
     def update_imu_attitude(self, q_meas: np.ndarray | None = None):
         """EKF attitude update using an external IMU rotation estimate.
@@ -340,8 +348,9 @@ class KalmanStateEstimator:
             if not np.all(np.isfinite(y)):
                 return
 
-            # H selects the attitude error block
-            H = np.zeros((3, 15))
+            # H selects the attitude error block in the 9-element error-state
+            # error-state: [pos(0:3), vel(3:6), att_err(6:9)]
+            H = np.zeros((3, 9))
             H[:, 6:9] = np.eye(3)
 
             sigma = 0.05  # rad (~2.9 deg)
@@ -357,6 +366,6 @@ class KalmanStateEstimator:
             dx = (K @ y).flatten()
             self._inject_error_state(dx)
 
-            # Joseph form for numerical stability
-            I = np.eye(15)
+            # Joseph form for numerical stability (9x9)
+            I = np.eye(9)
             self.P = (I - K @ H) @ self.P @ (I - K @ H).T + K @ R_meas @ K.T
