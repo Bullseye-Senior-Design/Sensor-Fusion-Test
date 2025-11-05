@@ -192,10 +192,8 @@ class PlotStateCmd(Command):
 
         # update top-down yaw view (do this after drawing to avoid flicker)
         if self.ax_top is not None:
-            quat = self.estimator.quat
-            euler = MathUtil.quat_to_euler(quat)
-            yaw = euler[2]
-
+            euler = self.estimator.euler
+            yaw = np.rad2deg(euler[2])
 
             # apply rotation to truck patches around origin
             trans = mtransforms.Affine2D().rotate(np.deg2rad(yaw)) + self.ax_top.transData
