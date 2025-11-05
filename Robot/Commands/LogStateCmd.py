@@ -85,10 +85,7 @@ class LogDataCmd(Command):
             pitch = float(euler[1]) * 180.0 / 3.141592653589793
             roll = float(euler[0]) * 180.0 / 3.141592653589793
             state_file = _make_log_filename('state_estimator')
-            # include accelerometer and gyro biases from the estimator
-            bax, bay, baz = tuple(kf.ba)
-            bgx, bgy, bgz = tuple(kf.bg)
-            self.save_state_to_csv(state, yaw, pitch, roll, state_file, timestamp=ts, ba=(bax, bay, baz), bg=(bgx, bgy, bgz))
+            self.save_state_to_csv(state, yaw, pitch, roll, state_file, timestamp=ts)
             # Also log covariance matrix (EKF P)
             try:
                 cov_file = _make_log_filename('ekf_covariance', 'txt')
@@ -285,7 +282,7 @@ class LogDataCmd(Command):
             print(f"Error saving UWB anchors to CSV: {e}")
             return False
 
-    def save_state_to_csv(self, state, yaw: float, pitch: float, roll: float, filename: str, timestamp: Optional[float] = None, ba: Optional[tuple] = None, bg: Optional[tuple] = None) -> bool:
+    def save_state_to_csv(self, state, yaw: float, pitch: float, roll: float, filename: str, timestamp: Optional[float] = None) -> bool:
         """Save estimator state (pos, vel, euler) and biases to CSV.
 
         ba: optional 3-tuple (bax, bay, baz)
@@ -296,7 +293,7 @@ class LogDataCmd(Command):
             file_exists = os.path.exists(filename)
             with open(filename, 'a', newline='') as csvfile:
                 # include bias columns if provided
-                fieldnames = ['timestamp', 'px', 'py', 'pz', 'vx', 'vy', 'vz', 'bax', 'bay', 'baz', 'bgx', 'bgy', 'bgz', 'yaw', 'pitch', 'roll']
+                fieldnames = ['timestamp', 'px', 'py', 'pz', 'vx', 'vy', 'vz', 'yaw', 'pitch', 'roll']
                 writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
                 if not file_exists:
                     writer.writeheader()
@@ -305,8 +302,6 @@ class LogDataCmd(Command):
                 ts = timestamp if timestamp is not None else time.time()
                 px, py, pz = state.pos
                 vx, vy, vz = state.vel
-                bax_val, bay_val, baz_val = (('', '', '') if ba is None else ba)
-                bgx_val, bgy_val, bgz_val = (('', '', '') if bg is None else bg)
                 writer.writerow({
                     'timestamp': ts,
                     'px': px,
@@ -315,12 +310,6 @@ class LogDataCmd(Command):
                     'vx': vx,
                     'vy': vy,
                     'vz': vz,
-                    'bax': bax_val,
-                    'bay': bay_val,
-                    'baz': baz_val,
-                    'bgx': bgx_val,
-                    'bgy': bgy_val,
-                    'bgz': bgz_val,
                     'yaw': yaw,
                     'pitch': pitch,
                     'roll': roll,
