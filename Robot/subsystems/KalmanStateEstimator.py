@@ -23,7 +23,26 @@ GRAVITY = np.array([0.0, 0.0, -9.80665])
 
 
 def quat_normalize(q: np.ndarray) -> np.ndarray:
-    return q / np.linalg.norm(q)
+    n = np.linalg.norm(q)
+    if n < 1e-12:
+        # return identity quaternion if input is degenerate
+        return np.array([0.0, 0.0, 0.0, 1.0], dtype=float)
+    return q / n
+
+
+def quat_sensor_to_estimator(q_sensor: np.ndarray) -> np.ndarray:
+    """Convert sensor quaternion (w, x, y, z) to estimator order [qx,qy,qz,qw].
+
+    Many IMU libraries (e.g. Adafruit BNO055) return quaternions as (w,x,y,z).
+    This helper makes the conversion explicit and safe.
+    """
+    if q_sensor is None:
+        return np.array([0.0, 0.0, 0.0, 1.0], dtype=float)
+    try:
+        w, x, y, z = (0.0 if v is None else float(v) for v in q_sensor)
+    except Exception:
+        return np.array([0.0, 0.0, 0.0, 1.0], dtype=float)
+    return np.array([x, y, z, w], dtype=float)
 
 def quat_to_rotmat(q: np.ndarray) -> np.ndarray:
     # q = [qx, qy, qz, qw]
@@ -209,8 +228,6 @@ class KalmanStateEstimator:
             self.x[0:3] = self.pos + self.vel * dt
             # velocity assumed constant (no accel integration)
             self.x[3:6] = self.vel
-
-            # attitude left unchanged (we do not integrate gyro here)
 
             # Linearized F for error-state propagation (9x9) with pos <- vel coupling
             F = np.zeros((9, 9))
