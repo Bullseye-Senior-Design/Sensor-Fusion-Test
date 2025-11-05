@@ -61,7 +61,7 @@ class KalmanStateEstimator:
         # Process noise (continuous) in error-state (9x9)
         q_pos = 1e-3
         q_vel = 1e-2
-        q_att = 1e-6
+        q_att = 1e-4
         self.Qc = block_diag(np.eye(3) * q_pos, np.eye(3) * q_vel, np.eye(3) * q_att)
 
         # Measurement noise templates
@@ -289,8 +289,6 @@ class KalmanStateEstimator:
         Args:
             q_meas: quaternion [qx,qy,qz,qw] (preferred).
             euler_rpy: roll, pitch, yaw in radians (used if q_meas is None).
-            R_meas: 3x3 measurement covariance in rad^2. If None, defaults to
-                    diag([sigma^2, sigma^2, sigma^2]) with sigma = 0.05 rad (~2.9 deg).
         """
         if q_meas is None:
             return
@@ -315,7 +313,7 @@ class KalmanStateEstimator:
             H = np.zeros((3, 9))
             H[:, 6:9] = np.eye(3)
 
-            sigma = 0.05  # rad (~2.9 deg)
+            sigma = 0.02  # 0.05 rad (~2.9 deg)
             R_meas = np.eye(3) * (sigma ** 2)
 
             S = H @ self.P @ H.T + R_meas
