@@ -51,6 +51,10 @@ class IMU():
         t = threading.Thread(target=self.initial_calibration, kwargs={"duration": 1.0, "sample_delay": 0.01}, daemon=True)
         t.start()
 
+        # Start magnetometer reference calibration in background (non-blocking)
+        # runs as a daemon thread and returns immediately
+        self.calibrate_mag_ref(duration=20.0, sample_delay=0.05, run_async=True)
+
         # Start continuous update loop immediately (calibration runs in parallel)
         self.begin()
 
@@ -146,6 +150,86 @@ class IMU():
             return np.vstack(samples)
         else:
             return np.empty((0, 3), dtype=float)
+
+    def _quat_to_rotmat_sensor(self, q_sensor: Tuple[float, float, float, float]) -> np.ndarray:
+        """
+        Convert a quaternion in sensor order (w, x, y, z) to a 3x3 rotation matrix R (body -> world).
+        Returns identity if input is invalid.
+        """
+        if q_sensor is None or len(q_sensor) != 4:
+            return np.eye(3)
+        w, x, y, z = (0.0 if v is None else float(v) for v in q_sensor)
+        R = np.empty((3, 3))
+        R[0, 0] = 1 - 2 * (y * y + z * z)
+        R[0, 1] = 2 * (x * y - z * w)
+        R[0, 2] = 2 * (x * z + y * w)
+        R[1, 0] = 2 * (x * y + z * w)
+        R[1, 1] = 1 - 2 * (x * x + z * z)
+        R[1, 2] = 2 * (y * z - x * w)
+        R[2, 0] = 2 * (x * z - y * w)
+        R[2, 1] = 2 * (y * z + x * w)
+        R[2, 2] = 1 - 2 * (x * x + y * y)
+        return R
+
+    def calibrate_mag_ref(self, duration: float = 20.0, sample_delay: float = 0.05, normalize: bool = True, run_async: bool = True):
+        """
+        Calibrate `self.mag_ref_world` by collecting magnetometer samples and transforming them
+        into the world frame using the sensor quaternion. Average the transformed vectors.
+
+        - duration: seconds to collect samples (rotate device during this time to sample orientations)
+        - sample_delay: seconds between samples
+        - normalize: if True, store unit vector (direction only). The KF uses direction-only comparison.
+        - async: if True, run calibration in a daemon thread and return the Thread object.
+
+        Returns the Thread if async=True, otherwise None.
+        """
+        def _calibrate():
+            print(f"IMU: starting mag_ref calibration for {duration:.1f}s - rotate the IMU on all axes...")
+            samples = []
+            end_t = time.time() + duration
+            while time.time() < end_t:
+                try:
+                    mag = self.sensor.magnetic  # body-frame magnetometer reading
+                    quat = self.sensor.quaternion  # sensor quaternion (w,x,y,z)
+                except Exception:
+                    mag = None
+                    quat = None
+
+                if mag is not None and all(v is not None for v in mag) and quat is not None and len(quat) == 4:
+                    try:
+                        mag_vec = np.asarray(mag, dtype=float)
+                        R = self._quat_to_rotmat_sensor(quat)  # type: ignore # body -> world
+                        mag_world = R @ mag_vec
+                        samples.append(mag_world)
+                    except Exception:
+                        pass
+
+                time.sleep(sample_delay)
+
+            if not samples:
+                print("IMU: mag_ref calibration collected no valid samples.")
+                return
+
+            arr = np.vstack(samples)
+            mean_world = np.mean(arr, axis=0)
+
+            if normalize:
+                nrm = np.linalg.norm(mean_world)
+                if nrm > 0:
+                    mean_world = mean_world / nrm
+
+            # thread-safe write
+            with self._lock:
+                self.mag_ref_world = mean_world.astype(float)
+            print("IMU: mag_ref_world calibrated ->", self.mag_ref_world)
+
+        if run_async:
+            thread = threading.Thread(target=_calibrate, daemon=True)
+            thread.start()
+            return thread
+        else:
+            _calibrate()
+            return None
 
     def initial_calibration(self, duration: float, sample_delay: float):
         """

@@ -186,16 +186,15 @@ class PlotStateCmd(Command):
 
 
             # apply rotation to truck patches around origin
-            trans = mtransforms.Affine2D().rotate(yaw) + self.ax_top.transData
+            trans = mtransforms.Affine2D().rotate(np.deg2rad(yaw)) + self.ax_top.transData
             # set same transform for all patches in axis
             for p in list(self.ax_top.patches):
                 p.set_transform(trans)
 
             # update yaw text in degrees
             try:
-                deg = np.degrees(yaw)
                 if self.yaw_text is not None:
-                    self.yaw_text.set_text(f"Yaw: {deg:.1f}\N{DEGREE SIGN}")
+                    self.yaw_text.set_text(f"Yaw: {yaw:.1f}\N{DEGREE SIGN}")
             except Exception:
                 if self.yaw_text is not None:
                     self.yaw_text.set_text("Yaw: --\N{DEGREE SIGN}")
