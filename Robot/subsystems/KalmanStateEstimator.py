@@ -233,7 +233,7 @@ class KalmanStateEstimator:
             # Covariance propagate
             self.P = Phi @ self.P @ Phi.T + Qd
 
-    def update_uwb_range(self, tag_pos_meas: np.ndarray, tag_offset: np.ndarray | None = None):
+    def update_uwb_range(self, tag_pos_meas: np.ndarray, tag_offset: np.ndarray | None = None, use_offset: bool = True):
         """EKF update using the fused UWB tag world position (POS), not per-anchor ranges.
 
         Measurement model:
@@ -253,7 +253,10 @@ class KalmanStateEstimator:
             if not np.all(np.isfinite(z)):
                 return
 
-            o_b = np.zeros(3) if tag_offset is None else np.asarray(tag_offset, dtype=float).reshape(3)
+            # Decide whether to apply the offset
+            o_b = np.zeros(3)
+            if use_offset and tag_offset is not None:
+                o_b = np.asarray(tag_offset, dtype=float).reshape(3)
 
             # rotation matrix from body to world
             q = MathUtil.quat_normalize(self.quat)
