@@ -247,9 +247,7 @@ class KalmanStateEstimator:
         Args:
             tag_pos_meas: (3,) measured tag position in world frame [m]
             tag_offset:   (3,) tag offset in body frame from robot center [m]; None => [0,0,0]
-        """
-        print(f"UWB position with offset: {tag_pos_meas + tag_offset}")
-        
+        """        
         with self._lock:
             z = np.asarray(tag_pos_meas, dtype=float).reshape(3)
             if not np.all(np.isfinite(z)):
@@ -263,6 +261,7 @@ class KalmanStateEstimator:
 
             # prediction h(x)
             h = self.pos + R @ o_b
+            print(f"UWB meas(world): {z}, offset_body: {o_b}, pred_tag_pos(world): {h}")
             y = z - h
 
             # Jacobian H (3x9): [ I3  03  R[o]_x ] wrt error-state [pos, vel, att_err]
