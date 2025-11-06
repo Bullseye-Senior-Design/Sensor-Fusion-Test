@@ -58,11 +58,6 @@ class LogDataCmd(Command):
             positions = []
             if hasattr(uwb, 'get_positions'):
                 positions = uwb.get_positions() or []
-                offsets = [tag.tag_offset for tag in uwb.tags]
-                # apply tag offsets if available
-                if offsets and len(offsets) == len(positions):
-                    offsetPositions = [np.array(pos) + np.array(offset) for pos, offset in zip(positions, offsets)]
-                print(f"UWB positions with offsets: {offsetPositions}")
                 
             # take up to two positions (older code expected two)
             p1 = positions[0] if len(positions) > 0 else None
