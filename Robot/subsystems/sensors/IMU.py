@@ -13,6 +13,18 @@ from typing import Optional, Tuple
 from Robot.subsystems.KalmanStateEstimator import KalmanStateEstimator
 from Robot.MathUtil import MathUtil
 
+# implement a simple low-pass IIR filter for smoothing IMU data
+# cutoff frequency fc_hz, sampling frequency fs_hz
+class _LowPassIIR:
+    def __init__(self, fc_hz: float, fs_hz: float, y0: float = 0.0):
+        dt = 1.0 / fs_hz
+        RC = 1.0 / (2.0 * math.pi * fc_hz)
+        self.alpha = dt / (RC + dt)
+        self.y = float(y0)
+    def update(self, x: float) -> float:
+        # differential equation implementation: (y[n] = y[n−1] + α (x[n] − y[n−1]))
+        self.y += self.alpha * (x - self.y)
+        return self.y
 
 class IMU():
     _instance = None
@@ -40,6 +52,10 @@ class IMU():
 
         self.interval = 0.01  # update interval in seconds
         self.mag_interval = self.interval * 5
+        # Filters (tune fc as needed)
+        fs_hz = 1.0 / self.interval # interval in herts
+        self._accel_lpf = [_LowPassIIR(fc_hz=8.0,  fs_hz=fs_hz) for _ in range(3)]
+        
         # timestamp of last magnetic sample
         self._last_mag_time = 0.0
 
@@ -183,6 +199,11 @@ class IMU():
             magnetic = mag_val # type: ignore
         if all(v is not None for v in quat_val):
             quat = quat_val # type: ignore
+
+        # Apply low-pass filter (if samples present)
+        if accel is not None:
+            ax = [self._accel_lpf[i].update(float(accel[i])) for i in range(3)]
+            accel = (ax[0], ax[1], ax[2])
 
         if quat is not None:
             quat_arr = np.asarray(quat, dtype=float)
