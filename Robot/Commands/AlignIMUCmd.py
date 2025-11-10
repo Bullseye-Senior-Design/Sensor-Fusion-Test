@@ -81,6 +81,8 @@ class AlignIMUCmd(Command):
 
         # compute world heading from motion (radians)
         world_yaw = float(np.arctan2(delta[1], delta[0]))
+        print(f"AlignIMUCmd: delta={delta}, world_yaw={np.degrees(world_yaw):.2f} deg")
+
 
         # get current IMU/estimator yaw (from estimator quaternion)
         q_est = self._est.quat
