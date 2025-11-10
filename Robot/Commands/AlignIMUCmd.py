@@ -1,7 +1,6 @@
 from structure.commands.Command import Command
 import numpy as np
 from Robot.MathUtil import MathUtil
-from Robot.subsystems.KalmanStateEstimator import KalmanStateEstimator
 from Robot.subsystems.sensors.UWB import UWB
 from Robot.subsystems.sensors.IMU import IMU
 
@@ -20,7 +19,6 @@ class AlignIMUCmd(Command):
         super().__init__()
         self.distance_threshold = float(distance_threshold)
 
-        self._est = KalmanStateEstimator()
         self._uwb = UWB()
         self._imu = IMU()
 
@@ -85,9 +83,8 @@ class AlignIMUCmd(Command):
 
 
         # get current IMU/estimator yaw (from estimator quaternion)
-        q_est = self._est.quat
-        imu_rpy = MathUtil.quat_to_euler(q_est)
-        imu_yaw = float(imu_rpy[2])
+        imu_euler = self._imu.get_euler()
+        imu_yaw = float(imu_euler[0])
 
         yaw_offset = world_yaw - imu_yaw  # radians
 
