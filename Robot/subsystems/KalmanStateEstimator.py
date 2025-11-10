@@ -150,63 +150,22 @@ class KalmanStateEstimator:
 
             # Try to get accelerometer reading from IMU singleton
             accel_tuple = None
-            try:
-                accel_tuple = IMU().get_accel()
-            except Exception:
-                accel_tuple = None
+            accel_tuple = IMU().get_accel()
 
             use_accel = False
             a_world = np.zeros(3)
 
             if accel_tuple is not None:
-                try:
-                    a_b = np.asarray(accel_tuple, dtype=float).reshape(3)
-                    if np.all(np.isfinite(a_b)):
-                        # rotate accel to world frame and remove gravity to get linear acceleration
-                        q = MathUtil.quat_normalize(self.quat)
-                        R = MathUtil.quat_to_rotmat(q)  # body->world
-                        a_w = R @ a_b
-                        # subtract gravity (world frame)
-                        a_lin = a_w - GRAVITY
+                a_b = np.asarray(accel_tuple, dtype=float).reshape(3)
+                if np.all(np.isfinite(a_b)):
+                    # rotate accel to world frame and remove gravity to get linear acceleration
+                    q = MathUtil.quat_normalize(self.quat)
+                    R = MathUtil.quat_to_rotmat(q)  # body->world
+                    a_w = R @ a_b
+                    # subtract gravity (world frame)
+                    a_lin = a_w - GRAVITY
 
-                        # Safety checks: magnitude and spike rejection
-                        norm = np.linalg.norm(a_lin)
-                        if norm > self._max_acc:
-                            # magnitude implausible -> reject
-                            self._accel_reject_count += 1
-                        else:
-                            # if we have a previous valid accel, check delta spike
-                            if self._accel_valid:
-                                delta = np.linalg.norm(a_lin - self._last_accel)
-                                if delta > self._max_delta_acc:
-                                    # sudden spike -> reject
-                                    self._accel_reject_count += 1
-                                else:
-                                    # accept
-                                    use_accel = True
-                                    self._accel_reject_count = 0
-                            else:
-                                # no previous valid accel -> accept this as the first valid sample
-                                use_accel = True
-                                self._accel_reject_count = 0
-
-                        # If accepted, store for next-sample delta checks
-                        if use_accel:
-                            a_world = a_lin
-                            self._last_accel = a_lin.copy()
-                            self._accel_valid = True
-                        else:
-                            # If too many consecutive rejects, mark accel invalid and clear last accel
-                            if self._accel_reject_count >= self._accel_reject_threshold:
-                                self._accel_valid = False
-                                # optionally reset last accel to zero to avoid huge deltas when next valid arrives
-                                self._last_accel = np.zeros(3)
-                    else:
-                        # non-finite -> reject
-                        self._accel_reject_count += 1
-                except Exception:
-                    # parsing/shape error -> reject
-                    self._accel_reject_count += 1
+                    a_world = a_lin
 
             # Integrate full state using accel if available, else constant-velocity
             if use_accel:
