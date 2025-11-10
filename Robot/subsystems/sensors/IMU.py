@@ -35,9 +35,6 @@ class IMU():
         self.magnetic = (0.0, 0.0, 0.0)
         self.quat = (0.0, 0.0, 0.0, 0.0)
 
-        # Reference magnetometer vector in world frame (can be adjusted or updated later)
-        self.mag_ref_world = np.array([0.0, 0.0, -1.0])
-
         self.interval = 0.01  # update interval in seconds
         self.mag_interval = self.interval * 5
         # timestamp of last magnetic sample
@@ -47,7 +44,14 @@ class IMU():
         self._lock = threading.RLock()
         self.state_estimator = KalmanStateEstimator()
 
-        self.sensor.offsets_accelerometer = (-26, 32702, -50)
+        # yaw offset to apply to sensor attitude (radians). This rotates the
+        # sensor-reported orientation into the chosen world frame.
+        self._yaw_offset_rad = 0.0
+        # cached estimator-order quaternion (aligned) for quick access
+        self._quat_est_cached = (0.0, 0.0, 0.0, 1.0)
+        self._is_offset_set = False
+
+        self.sensor.offsets_accelerometer = (-26, 0, -50)
         self.sensor.offsets_gyroscope = (-1, -4, -1)
         self.sensor.offsets_magnetometer = (-839, -601, -413)
         
@@ -78,6 +82,39 @@ class IMU():
     def get_quat(self) -> tuple:
         with self._lock:
             return tuple(self.quat)
+    
+    def set_yaw_offset(self, yaw_offset_deg: float) -> None:
+        """Set a yaw offset (degrees). The offset is stored and applied to
+        the quaternion sent to the estimator and available via
+        `get_aligned_quat()`.
+        """
+        yaw_deg = float(yaw_offset_deg)
+        with self._lock:
+            self._yaw_offset_rad = math.radians(yaw_deg)
+        self._is_offset_set = True
+
+    def get_aligned_quat(self) -> tuple:
+        """Return the last quaternion adjusted by the configured yaw offset.
+
+        Returned ordering is estimator ordering [qx,qy,qz,qw]. If no quaternion
+        has been read yet this returns a unit quaternion.
+        """
+        with self._lock:
+            raw = self.quat
+            if not raw or len(raw) != 4:
+                return (0.0, 0.0, 0.0, 1.0)
+            try:
+                q_sensor = np.asarray(raw, dtype=float)
+                q_est = MathUtil.quat_sensor_to_estimator(q_sensor)
+            except Exception:
+                q_est = np.array([0.0, 0.0, 0.0, 1.0], dtype=float)
+            # apply yaw offset if present
+            if abs(self._yaw_offset_rad) > 1e-12:
+                q_yaw = MathUtil.euler_to_quat(np.array([0.0, 0.0, self._yaw_offset_rad]))
+                q_est = MathUtil.quat_mul(q_yaw, q_est)
+                q_est = MathUtil.quat_normalize(q_est)
+            return tuple(q_est)
+        
     
     def get_euler(self) -> tuple:
         with self._lock:
@@ -187,19 +224,16 @@ class IMU():
         if quat is not None:
             quat_arr = np.asarray(quat, dtype=float)
             # convert sensor quaternion (w, x, y, z) to estimator order [qx,qy,qz,qw]
-            try:
-                q_est = MathUtil.quat_sensor_to_estimator(quat_arr)
-            except Exception:
-                q_est = quat_arr
-            # update attitude in KalmanStateEstimator
-            self.state_estimator.update_imu_attitude(q_meas=q_est)
-
-        # if accel_arr is not None and gyro_arr is not None:
-        #     self.state_estimator.predict(accel_meas=accel_arr, gyro_meas=gyro_arr)
-        # if magnetic is not None:
-        #     mag_arr = np.asarray(magnetic, dtype=float)
-        #     # use instance mag_ref_world (set during _start, can be changed later)
-        #     self.state_estimator.update_mag(mag_arr, self.mag_ref_world)
+            q_est = MathUtil.quat_sensor_to_estimator(quat_arr)
+            # apply configured yaw offset before sending to estimator
+            with self._lock:
+                yaw_off = float(self._yaw_offset_rad)
+            if self._is_offset_set:
+                q_yaw = MathUtil.euler_to_quat(np.array([0.0, 0.0, yaw_off]))
+                q_est = MathUtil.quat_mul(q_yaw, q_est)
+                q_est = MathUtil.quat_normalize(q_est)
+                # update attitude in KalmanStateEstimator
+                self.state_estimator.update_imu_attitude(q_meas=q_est)
 
         with self._lock:
             if accel is not None:
@@ -213,6 +247,15 @@ class IMU():
                 self._last_mag_time = time.time()
             if quat is not None:
                 self.quat = tuple(quat)
+                # also keep a cached estimator-order aligned quaternion for quick access
+                q_sensor = np.asarray(quat, dtype=float)
+                q_est_cached = MathUtil.quat_sensor_to_estimator(q_sensor)
+                if self._is_offset_set:
+                    q_yaw = MathUtil.euler_to_quat(np.array([0.0, 0.0, self._yaw_offset_rad]))
+                    q_est_cached = MathUtil.quat_mul(q_yaw, q_est_cached)
+                    q_est_cached = MathUtil.quat_normalize(q_est_cached)
+                    self._quat_est_cached = tuple(q_est_cached)
+
 
         # avoid busy loop
         time.sleep(self.interval)

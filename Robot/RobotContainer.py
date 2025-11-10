@@ -5,6 +5,7 @@ from Robot.subsystems.sensors.UWB import UWB
 from Robot.subsystems.sensors.IMU import IMU
 from Robot.Commands.LogStateCmd import LogDataCmd
 from Robot.Commands.PlotStateCmd import PlotStateCmd
+from Robot.Commands.AlignIMUCmd import AlignIMUCmd
 
 class RobotContainer:
     def __init__(self):
@@ -15,4 +16,5 @@ class RobotContainer:
     def begin_data_log(self):
         LogDataCmd().schedule()
         PlotStateCmd().schedule()
+        AlignIMUCmd(distance_threshold=1.0).schedule()
 
