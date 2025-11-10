@@ -86,7 +86,7 @@ class AlignIMUCmd(Command):
         imu_euler = self._imu.get_euler()
         imu_yaw = float(imu_euler[0])
 
-        yaw_offset = world_yaw - imu_yaw  # radians
+        yaw_offset = world_yaw - np.radians(imu_yaw)  # radians
 
         # Set yaw offset in IMU (degrees)
         self._imu.set_yaw_offset(np.degrees(yaw_offset))
