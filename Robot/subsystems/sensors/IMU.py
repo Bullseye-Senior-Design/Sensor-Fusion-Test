@@ -133,41 +133,35 @@ class IMU():
         
     
     def get_euler(self) -> tuple:
+        # Use MathUtil helpers: convert sensor quaternion ordering to estimator
+        # ordering, apply yaw offset if set, then convert to Euler using
+        # MathUtil.quat_to_euler which returns (roll, pitch, yaw) in radians.
         with self._lock:
-            q = tuple(self.quat)
+            raw = tuple(self.quat)
+            yaw_off = float(self._yaw_offset_rad)
 
-        # ensure we have a valid quaternion (w, x, y, z)
-        if not q or len(q) != 4:
+        # validate
+        if not raw or len(raw) != 4:
             return (0.0, 0.0, 0.0)
 
-        # ensure quaternion components are numeric (replace None with 0.0)
-        def _safe(val):
-            return 0.0 if val is None else float(val)
+        q_sensor = np.asarray(raw, dtype=float)
+        q_est = MathUtil.quat_sensor_to_estimator(q_sensor)
 
-        # assume quaternion is (w, x, y, z) as returned by Adafruit BNO055
-        w, x, y, z = (_safe(v) for v in q)
+        # apply yaw offset if configured
+        if self._is_offset_set and abs(yaw_off) > 1e-12:
+            q_yaw = MathUtil.euler_to_quat(np.array([0.0, 0.0, yaw_off]))
+            q_est = MathUtil.quat_mul(q_yaw, q_est)
+            q_est = MathUtil.quat_normalize(q_est)
 
-        # roll (x-axis rotation)
-        sinr_cosp = 2.0 * (w * x + y * z)
-        cosr_cosp = 1.0 - 2.0 * (x * x + y * y)
-        roll = math.atan2(sinr_cosp, cosr_cosp)
+        # MathUtil.quat_to_euler returns [roll, pitch, yaw] in radians
+        rpy = MathUtil.quat_to_euler(q_est)
 
-        # pitch (y-axis rotation)
-        sinp = 2.0 * (w * y - z * x)
-        if sinp >= 1.0:
-            pitch = math.pi / 2
-        elif sinp <= -1.0:
-            pitch = -math.pi / 2
-        else:
-            pitch = math.asin(sinp)
+        roll = float(rpy[0])
+        pitch = float(rpy[1])
+        yaw = float(rpy[2])
 
-        # yaw / heading (z-axis rotation)
-        siny_cosp = 2.0 * (w * z + x * y)
-        cosy_cosp = 1.0 - 2.0 * (y * y + z * z)
-        yaw = math.atan2(siny_cosp, cosy_cosp)
-
-        # return in (heading, roll, pitch) degrees to match sensor.euler ordering
         deg = math.degrees
+        # return in (heading, roll, pitch) degrees to match previous API
         return (deg(yaw), deg(roll), deg(pitch))
 
     def mag_interval_elapsed(self) -> bool:
