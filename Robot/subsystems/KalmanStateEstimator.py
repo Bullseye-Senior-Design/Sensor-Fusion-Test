@@ -223,7 +223,6 @@ class KalmanStateEstimator:
 
             # prediction h(x)
             h = self.pos + R @ o_b
-            print(f"UWB meas(world): {z}, offset_body: {o_b}, pred_tag_pos(world): {h}")
             y = z - h
 
             # Jacobian H (3x9): [ I3  03  R[o]_x ] wrt error-state [pos, vel, att_err]
