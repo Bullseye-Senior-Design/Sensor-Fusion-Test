@@ -71,6 +71,8 @@ class KalmanStateEstimator:
         # default sigma ~0.02 rad (~1.15 deg)
         self.imu_attitude_sigma = 0.04
         self.R_imu_attitude = np.eye(3) * (self.imu_attitude_sigma ** 2)
+        
+        threading.Thread(target=self._run_loop, daemon=True).start()
 
     # --- Helpers to access parts of the full state
     @property
