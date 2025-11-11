@@ -62,7 +62,7 @@ class IMU():
         self._accel_max_magnitude = 50.0
         # Hampel/median-window filter parameters (per-axis)
         self._accel_hampel_window_size = 5
-        self._accel_hampel_threshold = 15.0
+        self._accel_hampel_threshold = 5.0
         # per-axis ring buffers for Hampel
         self._accel_windows = [deque(maxlen=self._accel_hampel_window_size) for _ in range(3)]
         # Hampel counters and debug
@@ -276,39 +276,43 @@ class IMU():
             # don't pass through the filter in one step.
             raw_vals = [float(accel[i]) for i in range(3)]
             filtered = [0.0, 0.0, 0.0]
-            # Hampel median replacement: detect per-axis outliers using median + MAD
+            # Hampel median replacement: only run detection once the window is seeded
             for i in range(3):
                 val = raw_vals[i]
                 win = self._accel_windows[i]
-                # compute median and MAD from existing window (exclude current sample)
-                if len(win) > 0:
-                    med = float(np.median(np.asarray(list(win), dtype=float)))
-                    abs_devs = [abs(x - med) for x in win]
-                    mad = float(np.median(np.asarray(abs_devs, dtype=float)))
-                    scale = 1.4826 * mad
-                else:
-                    med = val
-                    mad = 0.0
-                    scale = 0.0
 
-                # detection threshold: use scaled MAD; fall back to a small epsilon to avoid zero division
+                # If window isn't full yet, seed it with raw samples (no detection)
+                if len(win) < self._accel_hampel_window_size:
+                    win.append(val)
+                    # leave raw_vals[i] as-is for later processing
+                    continue
+
+                # compute median and MAD from window
+                win_arr = np.asarray(list(win), dtype=float)
+                med = float(np.median(win_arr))
+                abs_devs = np.abs(win_arr - med)
+                mad = float(np.median(abs_devs))
+                scale = 1.4826 * mad
+
+                # detection threshold: prefer scaled MAD, but use a small absolute floor
                 if scale > 1e-9:
                     thresh = float(self._accel_hampel_threshold) * scale
                 else:
-                    # when MAD is zero (very stable), use a small absolute threshold
                     thresh = float(self._accel_hampel_threshold) * 1e-3
 
                 if abs(val - med) > thresh:
                     # outlier detected — replace sample with median
                     if self._accel_hampel_debug:
-                        print(f"IMU Hampel outlier axis={i} val={val} med={med} thresh={thresh}")
-                    raw_vals[i] = med
+                        print(f"IMU Hampel outlier axis={i} val={val} med={med} thresh={thresh} mad={mad}")
+                    val = med
                     self._accel_hampel_counters[i] += 1
-                    # append the replaced value into the window
-                    win.append(raw_vals[i])
-                else:
-                    # normal sample; append to window
                     win.append(val)
+                else:
+                    # normal sample; append actual value
+                    win.append(val)
+
+                # store possibly-replaced sample back to raw_vals for later processing
+                raw_vals[i] = val
             # quick magnitude check
             try:
                 mag = math.sqrt(raw_vals[0]*raw_vals[0] + raw_vals[1]*raw_vals[1] + raw_vals[2]*raw_vals[2])
