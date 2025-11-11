@@ -88,11 +88,19 @@ class KalmanStateEstimator:
         # multiplicatively by this factor (per rejection) up to uwb_max_inflation_factor.
         self.uwb_inflation_growth = 2.0
         self.uwb_max_inflation_factor = 100.0
+        # Growth and safety for repeated rejections
+        # If multiple consecutive rejections occur, grow the applied inflation
+        # multiplicatively by this factor (per rejection) up to uwb_max_inflation_factor.
         self._uwb_inflated = False
         self._uwb_inflation_expiry = 0.0
         self._pre_inflation_P = None
         # current applied inflation factor (1.0 == no inflation)
         self._uwb_inflation_current_factor = 1.0
+        # Consecutive rejection handling: after this many consecutive rejects,
+        # force a conservative acceptance/injection using an inflated R.
+        self.uwb_forced_accept_after_rejects = 5
+        self.uwb_forced_accept_R_scale = 10.0
+        self._uwb_consecutive_rejects = 0
 
     # --- Temporary covariance inflation helpers ---
     def _apply_uwb_inflation(self):
@@ -321,16 +329,48 @@ class KalmanStateEstimator:
             if nis > self.uwb_nis_threshold or abs_innov > self.uwb_max_innov:
                 # reject this measurement as an outlier
                 self.uwb_reject_count += 1
+                self._uwb_consecutive_rejects += 1
                 print(f"KalmanStateEstimator: UWB measurement rejected (NIS={nis:.2f}, |y|={abs_innov:.2f} m)")
                 # Temporarily inflate covariance to reflect increased uncertainty
                 self._apply_uwb_inflation()
-                print(f"KalmanStateEstimator: inflated covariance x{self.uwb_inflation_factor} for {self.uwb_inflation_duration}s due to UWB rejection")
+
+                # If we've seen many rejects in a row, force a conservative
+                # acceptance/injection using an inflated measurement covariance
+                if self._uwb_consecutive_rejects >= int(self.uwb_forced_accept_after_rejects):
+                    print(f"KalmanStateEstimator: forcing UWB accept after {self._uwb_consecutive_rejects} consecutive rejects")
+                    R_forced = R_meas * float(self.uwb_forced_accept_R_scale)
+                    S_forced = H @ self.P @ H.T + R_forced
+                    try:
+                        Sinv_forced = np.linalg.inv(S_forced)
+                    except np.linalg.LinAlgError:
+                        return
+
+                    K = self.P @ H.T @ Sinv_forced
+                    dx = (K @ y).flatten()
+
+                    # inject and update P under lock
+                    self._inject_error_state(dx)
+
+                    # Joseph form for numerical stability (9x9)
+                    I = np.eye(9)
+                    self.P = (I - K @ H) @ self.P @ (I - K @ H).T + K @ R_forced @ K.T
+
+                    # reset counters and clear any temporary inflation
+                    self._uwb_consecutive_rejects = 0
+                    if self._uwb_inflated:
+                        self._clear_uwb_inflation()
+                    return
+
+                # otherwise just return after inflating
+                print(f"KalmanStateEstimator: inflated covariance x{self._uwb_inflation_current_factor} for {self.uwb_inflation_duration}s due to UWB rejection")
                 return
 
             # If we had a temporary inflation active, clear it now that we
             # accepted a good UWB measurement (we'll restore the normal P).
             if self._uwb_inflated:
                 self._clear_uwb_inflation()
+            # reset consecutive reject counter on accepted measurement
+            self._uwb_consecutive_rejects = 0
 
             K = self.P @ H.T @ Sinv
 
