@@ -84,41 +84,75 @@ class KalmanStateEstimator:
         # accepted measurement).
         self.uwb_inflation_factor = 5.0
         self.uwb_inflation_duration = 1.0  # seconds
+        # If multiple consecutive rejections occur, grow the applied inflation
+        # multiplicatively by this factor (per rejection) up to uwb_max_inflation_factor.
+        self.uwb_inflation_growth = 2.0
+        self.uwb_max_inflation_factor = 100.0
         self._uwb_inflated = False
         self._uwb_inflation_expiry = 0.0
         self._pre_inflation_P = None
-
-        threading.Thread(target=self._run_loop, daemon=True).start()
+        # current applied inflation factor (1.0 == no inflation)
+        self._uwb_inflation_current_factor = 1.0
 
     # --- Temporary covariance inflation helpers ---
     def _apply_uwb_inflation(self):
-        """Inflate the error-state covariance temporarily on UWB rejection."""
+        """Inflate the error-state covariance temporarily on UWB rejection.
+
+        Behavior:
+        - On first rejection save the current covariance as baseline and apply
+          `uwb_inflation_factor`.
+        - On subsequent rejections while already inflated increase the applied
+          factor by `uwb_inflation_growth` (multiplicative) up to
+          `uwb_max_inflation_factor`, and re-apply it to the saved baseline.
+        """
         with self._lock:
             import time
+            # First rejection: save baseline and apply initial inflation
             if not self._uwb_inflated:
-                # Save pre-inflation covariance so we can restore it later
                 try:
                     self._pre_inflation_P = self.P.copy()
                 except Exception:
                     self._pre_inflation_P = None
-                # Apply multiplicative inflation
-                self.P = self.P * float(self.uwb_inflation_factor)
-                self._uwb_inflated = True
-                self._uwb_inflation_expiry = time.time() + float(self.uwb_inflation_duration)
+                # start from the configured base inflation
+                self._uwb_inflation_current_factor = float(self.uwb_inflation_factor)
             else:
-                # Already inflated: extend expiry window
-                self._uwb_inflation_expiry = time.time() + float(self.uwb_inflation_duration)
+                # already inflated: grow the current factor multiplicatively,
+                # but cap to avoid runaway numeric growth
+                self._uwb_inflation_current_factor = min(
+                    float(self._uwb_inflation_current_factor) * float(self.uwb_inflation_growth),
+                    float(self.uwb_max_inflation_factor),
+                )
+
+            # Apply inflation relative to the saved baseline if available; this
+            # avoids compounding floating-point error when repeatedly inflating.
+            if self._pre_inflation_P is not None:
+                self.P = self._pre_inflation_P * float(self._uwb_inflation_current_factor)
+            else:
+                # If we couldn't save baseline for any reason, fall back to
+                # multiplying current P (best-effort).
+                self.P = self.P * float(self._uwb_inflation_current_factor)
+
+            self._uwb_inflated = True
+            self._uwb_inflation_expiry = time.time() + float(self.uwb_inflation_duration)
+
+            # Debug/log so you can see growth on repeated rejections
+            try:
+                print(f"KalmanStateEstimator: applied UWB inflation factor x{self._uwb_inflation_current_factor:.1f} (expiry in {self.uwb_inflation_duration}s)")
+            except Exception:
+                pass
 
     def _clear_uwb_inflation(self):
-        """Restore covariance if we previously inflated it."""
+        """Restore covariance if we previously inflated it and reset inflation state."""
         with self._lock:
             if self._uwb_inflated and self._pre_inflation_P is not None:
-                # Restore the saved covariance
+                # Restore the saved baseline covariance
                 self.P = self._pre_inflation_P
             # Clear inflation state regardless
             self._uwb_inflated = False
             self._uwb_inflation_expiry = 0.0
             self._pre_inflation_P = None
+            self._uwb_inflation_current_factor = 1.0
+# ...existing code...
 
     # --- Helpers to access parts of the full state
     @property
