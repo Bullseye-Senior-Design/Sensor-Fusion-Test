@@ -58,7 +58,7 @@ class IMU():
         # _accel_outlier_threshold it will be clamped to that threshold
         # before being fed to the low-pass filter. Also, samples with
         # magnitude > _accel_max_magnitude or NaN/Inf are ignored/clamped.
-        self._accel_outlier_threshold = 5.0
+        self._accel_outlier_threshold = 10.0
         self._accel_max_magnitude = 50.0
         # Hampel/median-window filter parameters (per-axis)
         self._accel_hampel_window_size = 5
@@ -124,6 +124,26 @@ class IMU():
         with self._lock:
             self._yaw_offset_rad = math.radians(yaw_deg)
             self._is_offset_set = True
+
+    def set_hampel_threshold(self, k: float) -> None:
+        """Set the Hampel detection multiplier k (default 3.0)."""
+        with self._lock:
+            self._accel_hampel_threshold = float(k)
+
+    def scale_hampel_threshold(self, factor: float) -> None:
+        """Multiply the current Hampel threshold by factor (e.g. 10 to increase by magnitude 10)."""
+        with self._lock:
+            self._accel_hampel_threshold *= float(factor)
+
+    def set_accel_outlier_threshold(self, value: float) -> None:
+        """Set the per-sample accel delta clamp (m/s^2)."""
+        with self._lock:
+            self._accel_outlier_threshold = float(value)
+
+    def scale_accel_outlier_threshold(self, factor: float) -> None:
+        """Multiply the accel outlier threshold by factor (e.g. 10)."""
+        with self._lock:
+            self._accel_outlier_threshold *= float(factor)
 
     def get_aligned_quat(self) -> tuple:
         """Return the last quaternion adjusted by the configured yaw offset.
