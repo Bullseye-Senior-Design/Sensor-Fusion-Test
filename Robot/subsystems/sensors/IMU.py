@@ -58,11 +58,11 @@ class IMU():
         # _accel_outlier_threshold it will be clamped to that threshold
         # before being fed to the low-pass filter. Also, samples with
         # magnitude > _accel_max_magnitude or NaN/Inf are ignored/clamped.
-        self._accel_outlier_threshold = 10.0
+        self._accel_outlier_threshold = 5.0
         self._accel_max_magnitude = 50.0
         # Hampel/median-window filter parameters (per-axis)
         self._accel_hampel_window_size = 5
-        self._accel_hampel_threshold = 3.0
+        self._accel_hampel_threshold = 15.0
         # per-axis ring buffers for Hampel
         self._accel_windows = [deque(maxlen=self._accel_hampel_window_size) for _ in range(3)]
         # Hampel counters and debug
