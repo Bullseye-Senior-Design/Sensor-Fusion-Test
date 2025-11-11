@@ -133,6 +133,8 @@ class IMU():
         
     
     def get_euler(self) -> tuple:
+        """Return the current (yaw, roll, pitch) in degrees, adjusted by yaw offset.
+        """
         # Use MathUtil helpers: convert sensor quaternion ordering to estimator
         # ordering, apply yaw offset if set, then convert to Euler using
         # MathUtil.quat_to_euler which returns (roll, pitch, yaw) in radians.
