@@ -4,12 +4,11 @@ from Robot.MathUtil import MathUtil
 from Robot.subsystems.sensors.UWB import UWB
 from Robot.subsystems.sensors.IMU import IMU
 
-# TODO look into using PCA/SVD for a better offset estimate
 class AlignIMUCmd(Command):
     """Command that waits until the estimator's UWB-derived position has moved
     at least `distance_threshold` meters (planar XY). Once the threshold is
-    reached it computes the motion heading and aligns the IMU yaw to that
-    heading.
+    reached it computes the motion heading and aligns the IMU yaw to the x+ axis
+    of the motion heading.
 
     Parameters:
         distance_threshold: meters of planar travel required to compute yaw
