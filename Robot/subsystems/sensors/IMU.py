@@ -8,6 +8,7 @@ import busio
 import adafruit_bno055
 import math
 import numpy as np
+from collections import deque
 import time
 from typing import Optional, Tuple
 from Robot.subsystems.KalmanStateEstimator import KalmanStateEstimator
@@ -52,6 +53,21 @@ class IMU():
         # Filters (tune fc as needed)
         fs_hz = 1.0 / self.interval # interval in herts
         self._accel_lpf = [_LowPassIIR(fc_hz=8.0,  fs_hz=fs_hz) for _ in range(3)]
+        # Outlier rejection/clamping for accelerometer (m/s^2)
+        # If a single-sample delta from the filter state is larger than
+        # _accel_outlier_threshold it will be clamped to that threshold
+        # before being fed to the low-pass filter. Also, samples with
+        # magnitude > _accel_max_magnitude or NaN/Inf are ignored/clamped.
+        self._accel_outlier_threshold = 5.0
+        self._accel_max_magnitude = 50.0
+        # Hampel/median-window filter parameters (per-axis)
+        self._accel_hampel_window_size = 5
+        self._accel_hampel_threshold = 3.0
+        # per-axis ring buffers for Hampel
+        self._accel_windows = [deque(maxlen=self._accel_hampel_window_size) for _ in range(3)]
+        # Hampel counters and debug
+        self._accel_hampel_counters = [0, 0, 0]
+        self._accel_hampel_debug = True
         
         # timestamp of last magnetic sample
         self._last_mag_time = 0.0
@@ -235,8 +251,74 @@ class IMU():
 
         # Apply low-pass filter (if samples present)
         if accel is not None:
-            ax = [self._accel_lpf[i].update(float(accel[i])) for i in range(3)]
-            accel = (ax[0], ax[1], ax[2])
+            # Protect against NaN/Inf, huge spikes, and clamp single-sample
+            # deltas relative to the current LPF state so large outliers
+            # don't pass through the filter in one step.
+            raw_vals = [float(accel[i]) for i in range(3)]
+            filtered = [0.0, 0.0, 0.0]
+            # Hampel median replacement: detect per-axis outliers using median + MAD
+            for i in range(3):
+                val = raw_vals[i]
+                win = self._accel_windows[i]
+                # compute median and MAD from existing window (exclude current sample)
+                if len(win) > 0:
+                    med = float(np.median(np.asarray(list(win), dtype=float)))
+                    abs_devs = [abs(x - med) for x in win]
+                    mad = float(np.median(np.asarray(abs_devs, dtype=float)))
+                    scale = 1.4826 * mad
+                else:
+                    med = val
+                    mad = 0.0
+                    scale = 0.0
+
+                # detection threshold: use scaled MAD; fall back to a small epsilon to avoid zero division
+                if scale > 1e-9:
+                    thresh = float(self._accel_hampel_threshold) * scale
+                else:
+                    # when MAD is zero (very stable), use a small absolute threshold
+                    thresh = float(self._accel_hampel_threshold) * 1e-3
+
+                if abs(val - med) > thresh:
+                    # outlier detected — replace sample with median
+                    if self._accel_hampel_debug:
+                        print(f"IMU Hampel outlier axis={i} val={val} med={med} thresh={thresh}")
+                    raw_vals[i] = med
+                    self._accel_hampel_counters[i] += 1
+                    # append the replaced value into the window
+                    win.append(raw_vals[i])
+                else:
+                    # normal sample; append to window
+                    win.append(val)
+            # quick magnitude check
+            try:
+                mag = math.sqrt(raw_vals[0]*raw_vals[0] + raw_vals[1]*raw_vals[1] + raw_vals[2]*raw_vals[2])
+            except Exception:
+                mag = float('inf')
+
+            for i in range(3):
+                lpf = self._accel_lpf[i]
+                prev = lpf.y
+                val = raw_vals[i]
+
+                # NaN/Inf protection
+                if not math.isfinite(val):
+                    # replace with previous filtered value
+                    val = prev
+
+                # If the whole vector is absurdly large, clamp to previous
+                if mag > float(self._accel_max_magnitude):
+                    val = prev
+                else:
+                    # clamp single-axis delta to avoid single-sample spikes
+                    delta = val - prev
+                    max_delta = float(self._accel_outlier_threshold)
+                    if abs(delta) > max_delta:
+                        val = prev + math.copysign(max_delta, delta)
+
+                # update LPF with the protected/clamped value
+                filtered[i] = lpf.update(val)
+
+            accel = (filtered[0], filtered[1], filtered[2])
 
         if quat is not None:
             quat_arr = np.asarray(quat, dtype=float)
