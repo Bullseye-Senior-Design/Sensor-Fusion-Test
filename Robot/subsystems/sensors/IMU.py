@@ -62,7 +62,9 @@ class IMU():
         self._accel_max_magnitude = 50.0
         # Hampel/median-window filter parameters (per-axis)
         self._accel_hampel_window_size = 5
-        self._accel_hampel_threshold = 5.0
+        self._accel_hampel_threshold = 3.0
+        # absolute fallback threshold (m/s^2) when MAD is zero or very small
+        self._accel_hampel_abs_threshold = 0.05
         # per-axis ring buffers for Hampel
         self._accel_windows = [deque(maxlen=self._accel_hampel_window_size) for _ in range(3)]
         # Hampel counters and debug
@@ -294,11 +296,12 @@ class IMU():
                 mad = float(np.median(abs_devs))
                 scale = 1.4826 * mad
 
-                # detection threshold: prefer scaled MAD, but use a small absolute floor
+                # detection threshold: prefer scaled MAD, but use an absolute floor
+                abs_floor = float(self._accel_hampel_abs_threshold)
                 if scale > 1e-9:
-                    thresh = float(self._accel_hampel_threshold) * scale
+                    thresh = max(float(self._accel_hampel_threshold) * scale, abs_floor)
                 else:
-                    thresh = float(self._accel_hampel_threshold) * 1e-3
+                    thresh = abs_floor
 
                 if abs(val - med) > thresh:
                     # outlier detected — replace sample with median
