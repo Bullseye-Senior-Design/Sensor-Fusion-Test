@@ -71,95 +71,6 @@ class KalmanStateEstimator:
         # default sigma ~0.02 rad (~1.15 deg)
         self.imu_attitude_sigma = 0.02
         self.R_imu_attitude = np.eye(3) * (self.imu_attitude_sigma ** 2)
-        # UWB outlier rejection / gating parameters
-        # Mahalanobis (NIS) gate for 3-DOF measurement (chi-square 95% ≈ 7.815)
-        self.uwb_nis_threshold = 7.815
-        # Absolute innovation (meters) fallback guard: reject if |y| > uwb_max_innov
-        self.uwb_max_innov = 2.0  # meters; tune to your system
-        # Diagnostic counter for rejected UWB updates
-        self.uwb_reject_count = 0
-        # Temporary covariance inflation settings applied when UWB is rejected.
-        # On rejection we inflate the error-state covariance by `uwb_inflation_factor`
-        # for `uwb_inflation_duration` seconds (restored after expiry or on next
-        # accepted measurement).
-        self.uwb_inflation_factor = 5.0
-        self.uwb_inflation_duration = 1.0  # seconds
-        # If multiple consecutive rejections occur, grow the applied inflation
-        # multiplicatively by this factor (per rejection) up to uwb_max_inflation_factor.
-        self.uwb_inflation_growth = 2.0
-        self.uwb_max_inflation_factor = 100.0
-        # Growth and safety for repeated rejections
-        # If multiple consecutive rejections occur, grow the applied inflation
-        # multiplicatively by this factor (per rejection) up to uwb_max_inflation_factor.
-        self._uwb_inflated = False
-        self._uwb_inflation_expiry = 0.0
-        self._pre_inflation_P = None
-        # current applied inflation factor (1.0 == no inflation)
-        self._uwb_inflation_current_factor = 1.0
-        # Consecutive rejection handling: after this many consecutive rejects,
-        # force a conservative acceptance/injection using an inflated R.
-        self.uwb_forced_accept_after_rejects = 5
-        self.uwb_forced_accept_R_scale = 10.0
-        self._uwb_consecutive_rejects = 0
-
-    # --- Temporary covariance inflation helpers ---
-    def _apply_uwb_inflation(self):
-        """Inflate the error-state covariance temporarily on UWB rejection.
-
-        Behavior:
-        - On first rejection save the current covariance as baseline and apply
-          `uwb_inflation_factor`.
-        - On subsequent rejections while already inflated increase the applied
-          factor by `uwb_inflation_growth` (multiplicative) up to
-          `uwb_max_inflation_factor`, and re-apply it to the saved baseline.
-        """
-        with self._lock:
-            import time
-            # First rejection: save baseline and apply initial inflation
-            if not self._uwb_inflated:
-                try:
-                    self._pre_inflation_P = self.P.copy()
-                except Exception:
-                    self._pre_inflation_P = None
-                # start from the configured base inflation
-                self._uwb_inflation_current_factor = float(self.uwb_inflation_factor)
-            else:
-                # already inflated: grow the current factor multiplicatively,
-                # but cap to avoid runaway numeric growth
-                self._uwb_inflation_current_factor = min(
-                    float(self._uwb_inflation_current_factor) * float(self.uwb_inflation_growth),
-                    float(self.uwb_max_inflation_factor),
-                )
-
-            # Apply inflation relative to the saved baseline if available; this
-            # avoids compounding floating-point error when repeatedly inflating.
-            if self._pre_inflation_P is not None:
-                self.P = self._pre_inflation_P * float(self._uwb_inflation_current_factor)
-            else:
-                # If we couldn't save baseline for any reason, fall back to
-                # multiplying current P (best-effort).
-                self.P = self.P * float(self._uwb_inflation_current_factor)
-
-            self._uwb_inflated = True
-            self._uwb_inflation_expiry = time.time() + float(self.uwb_inflation_duration)
-
-            # Debug/log so you can see growth on repeated rejections
-            try:
-                print(f"KalmanStateEstimator: applied UWB inflation factor x{self._uwb_inflation_current_factor:.1f} (expiry in {self.uwb_inflation_duration}s)")
-            except Exception:
-                pass
-
-    def _clear_uwb_inflation(self):
-        """Restore covariance if we previously inflated it and reset inflation state."""
-        with self._lock:
-            if self._uwb_inflated and self._pre_inflation_P is not None:
-                # Restore the saved baseline covariance
-                self.P = self._pre_inflation_P
-            # Clear inflation state regardless
-            self._uwb_inflated = False
-            self._uwb_inflation_expiry = 0.0
-            self._pre_inflation_P = None
-            self._uwb_inflation_current_factor = 1.0
 
     # --- Helpers to access parts of the full state
     @property
@@ -222,9 +133,6 @@ class KalmanStateEstimator:
         from Robot.subsystems.sensors.IMU import IMU
 
         with self._lock:
-            # expire temporary UWB inflation if its duration passed
-            if self._uwb_inflated and time.time() > self._uwb_inflation_expiry:
-                self._clear_uwb_inflation()
             dt = self.dt
 
             # Try to get accelerometer reading from IMU singleton
@@ -321,56 +229,6 @@ class KalmanStateEstimator:
                 Sinv = np.linalg.inv(S)
             except np.linalg.LinAlgError:
                 return
-
-            # --- Outlier gating: Mahalanobis (NIS) + absolute innovation check ---
-            nis = float(y.T @ Sinv @ y)
-            abs_innov = float(np.linalg.norm(y))
-
-            if nis > self.uwb_nis_threshold or abs_innov > self.uwb_max_innov:
-                # reject this measurement as an outlier
-                self.uwb_reject_count += 1
-                self._uwb_consecutive_rejects += 1
-                print(f"KalmanStateEstimator: UWB measurement rejected (NIS={nis:.2f}, |y|={abs_innov:.2f} m)")
-                # Temporarily inflate covariance to reflect increased uncertainty
-                self._apply_uwb_inflation()
-
-                # If we've seen many rejects in a row, force a conservative
-                # acceptance/injection using an inflated measurement covariance
-                if self._uwb_consecutive_rejects >= int(self.uwb_forced_accept_after_rejects):
-                    print(f"KalmanStateEstimator: forcing UWB accept after {self._uwb_consecutive_rejects} consecutive rejects")
-                    R_forced = R_meas * float(self.uwb_forced_accept_R_scale)
-                    S_forced = H @ self.P @ H.T + R_forced
-                    try:
-                        Sinv_forced = np.linalg.inv(S_forced)
-                    except np.linalg.LinAlgError:
-                        return
-
-                    K = self.P @ H.T @ Sinv_forced
-                    dx = (K @ y).flatten()
-
-                    # inject and update P under lock
-                    self._inject_error_state(dx)
-
-                    # Joseph form for numerical stability (9x9)
-                    I = np.eye(9)
-                    self.P = (I - K @ H) @ self.P @ (I - K @ H).T + K @ R_forced @ K.T
-
-                    # reset counters and clear any temporary inflation
-                    self._uwb_consecutive_rejects = 0
-                    if self._uwb_inflated:
-                        self._clear_uwb_inflation()
-                    return
-
-                # otherwise just return after inflating
-                print(f"KalmanStateEstimator: inflated covariance x{self._uwb_inflation_current_factor} for {self.uwb_inflation_duration}s due to UWB rejection")
-                return
-
-            # If we had a temporary inflation active, clear it now that we
-            # accepted a good UWB measurement (we'll restore the normal P).
-            if self._uwb_inflated:
-                self._clear_uwb_inflation()
-            # reset consecutive reject counter on accepted measurement
-            self._uwb_consecutive_rejects = 0
 
             K = self.P @ H.T @ Sinv
 
