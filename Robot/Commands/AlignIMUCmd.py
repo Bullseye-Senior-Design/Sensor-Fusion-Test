@@ -92,7 +92,7 @@ class AlignIMUCmd(Command):
         self._imu.set_yaw_offset(np.degrees(yaw_offset))
 
         self._applied = True
-        print(f"AlignIMUCmd: traveled {dist:.3f} m -> world_yaw={np.degrees(world_yaw):.2f} deg, imu_yaw={np.degrees(imu_yaw):.2f} deg, applied yaw_offset={np.degrees(yaw_offset):.2f} deg")
+        print(f"AlignIMUCmd: traveled {dist:.3f} m -> world_yaw={np.degrees(world_yaw):.2f} deg, imu_yaw={imu_yaw:.2f} deg, applied yaw_offset={np.degrees(yaw_offset):.2f} deg")
 
     def end(self, interrupted):
         if interrupted:
