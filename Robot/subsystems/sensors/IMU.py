@@ -45,7 +45,7 @@ class IMU():
         self.acceleration = (0.0, 0.0, 0.0)
         self.gyro = (0.0, 0.0, 0.0)
         self.magnetic = (0.0, 0.0, 0.0)
-        self.quat = (0.0, 0.0, 0.0, 0.0)
+        self.quat = (0.0, 0.0, 0.0, 1.0)
 
         self.interval = 0.01  # update interval in seconds
         self.mag_interval = self.interval * 5
