@@ -107,7 +107,7 @@ class IMU():
         yaw_deg = float(yaw_offset_deg)
         with self._lock:
             self._yaw_offset_rad = math.radians(yaw_deg)
-        self._is_offset_set = True
+            self._is_offset_set = True
 
     def get_aligned_quat(self) -> tuple:
         """Return the last quaternion adjusted by the configured yaw offset.
@@ -125,7 +125,7 @@ class IMU():
             except Exception:
                 q_est = np.array([0.0, 0.0, 0.0, 1.0], dtype=float)
             # apply yaw offset if present
-            if abs(self._yaw_offset_rad) > 1e-12:
+            if self._is_offset_set and abs(self._yaw_offset_rad) > 1e-12:
                 q_yaw = MathUtil.euler_to_quat(np.array([0.0, 0.0, self._yaw_offset_rad]))
                 q_est = MathUtil.quat_mul(q_yaw, q_est)
                 q_est = MathUtil.quat_normalize(q_est)

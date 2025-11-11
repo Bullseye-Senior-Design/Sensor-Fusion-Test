@@ -8,7 +8,7 @@ class Command:
     
     # Called when the command is first run
     # should be overridden by the child class
-    def initalize(self):
+    def initailize(self):
         pass
     
     # Called every time while the command isn't finished

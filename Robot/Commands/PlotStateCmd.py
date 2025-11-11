@@ -56,7 +56,7 @@ class PlotStateCmd(Command):
         self.imu = IMU()
         self.uwb = UWB()   # <-- ADDED: singleton UWB interface
 
-    def initalize(self):
+    def initailize(self):
         # Create Tk window and Matplotlib canvas. We do NOT call mainloop;
         # instead we call root.update() from execute() so the window is non-blocking.
         if tk is None:
