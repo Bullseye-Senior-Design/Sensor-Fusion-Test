@@ -11,7 +11,7 @@ class SequentialCommandGroup(Command):
             self.commands.append(command)
             super().add_cmd_requirements(command)
     
-    def initailize(self):
+    def initialize(self):
         self.current_command = 0
         
         # initalize the first command

@@ -20,7 +20,7 @@ class LogDataCmd(Command):
     def __init__(self):
         super().__init__()
         
-    def initailize(self):
+    def initialize(self):
         # record when logging begins and create a timestamped folder to hold all logs
         self.begin_timestamp = time.time()
         ts_str = time.strftime('%Y%m%d_%H%M%S', time.localtime(self.begin_timestamp))

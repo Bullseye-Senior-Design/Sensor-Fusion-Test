@@ -23,7 +23,7 @@ class AlignIMUCmd(Command):
         # store recent UWB positions (list of [x,y] numpy arrays) for PCA
         self._positions_history = []
 
-    def initailize(self):
+    def initialize(self):
         self._started = False
         self._start_pos = None  # numpy array [x,y,z] in world (from UWB)
         self._applied = False

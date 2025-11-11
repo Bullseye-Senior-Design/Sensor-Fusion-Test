@@ -5,7 +5,7 @@ class InstantCommand(Command):
         super().__init__()
         self.function = function
     
-    def initailize(self):
+    def initialize(self):
         self.function()
     
     def execute(self):
