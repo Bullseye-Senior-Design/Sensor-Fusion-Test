@@ -152,7 +152,6 @@ class KalmanStateEstimator:
             self._uwb_inflation_expiry = 0.0
             self._pre_inflation_P = None
             self._uwb_inflation_current_factor = 1.0
-# ...existing code...
 
     # --- Helpers to access parts of the full state
     @property
