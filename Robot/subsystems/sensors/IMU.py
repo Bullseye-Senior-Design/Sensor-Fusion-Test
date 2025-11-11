@@ -62,7 +62,7 @@ class IMU():
         self._accel_max_magnitude = 50.0
         # Simple median-window filter parameters (per-axis)
         # We'll use a small sliding window median to suppress spikes.
-        self._accel_median_window_size = 5
+        self._accel_median_window_size = 3
         # per-axis ring buffers for median filter
         self._accel_windows = [deque(maxlen=self._accel_median_window_size) for _ in range(3)]
         # debug flag to print when a raw value differs strongly from the median
