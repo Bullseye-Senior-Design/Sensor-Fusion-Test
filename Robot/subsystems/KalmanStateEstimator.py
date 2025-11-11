@@ -18,6 +18,7 @@ import threading
 from dataclasses import dataclass
 from typing import Tuple
 from Robot.MathUtil import MathUtil
+import time
 
 GRAVITY = np.array([0.0, 0.0, -9.80665])
 
@@ -50,40 +51,74 @@ class KalmanStateEstimator:
         self.x[6:10] = np.array([0.0, 0.0, 0.0, 1.0])
 
         # Error-state covariance for [pos(3), vel(3), att_err(3)] => 9x9
-        P_pos = np.eye(3) * 1e-2
-        P_vel = np.eye(3) * 1e-2
-        P_att = np.eye(3) * 1e-3
+        P_pos = np.eye(3) * 1e-0
+        P_vel = np.eye(3) * 1e-0
+        P_att = np.eye(3) * 1e-0
         self.P = np.zeros((9, 9))
         self.P[0:3, 0:3] = P_pos
         self.P[3:6, 3:6] = P_vel
         self.P[6:9, 6:9] = P_att
 
         # Process noise (continuous) in error-state (9x9)
-        q_pos = 1e-2
-        q_vel = 1e-1
-        q_att = 1e-4
+        q_pos = 1e-3
+        q_vel = 1e-2
+        q_att = 1e-2
         self.Qc = block_diag(np.eye(3) * q_pos, np.eye(3) * q_vel, np.eye(3) * q_att)
 
         # Measurement noise templates
         self.R_uwb_range = 0.1 ** 2  # 10 cm sigma default (variance)
-        self.R_mag = np.eye(3) * (0.3 ** 2) / 12  # for mag direction residuals (tunable)
-        
-        # --- accel protection parameters/state (added) ---
-        # maximum allowed linear acceleration magnitude (m/s^2)
-        self._max_acc = 30.0
-        # maximum allowed change in linear acceleration between samples (m/s^2)
-        self._max_delta_acc = 15.0
-        # how many consecutive bad accel samples before we consider accel invalid
-        self._accel_reject_threshold = 5
-        # last accepted linear acceleration (world frame)
-        self._last_accel = np.zeros(3)
-        # number of consecutive rejected accel samples
-        self._accel_reject_count = 0
-        # whether we've seen at least one valid accel sample
-        self._accel_valid = False
-        # --------------------------------------------------
+        # IMU attitude measurement noise (small-angle residuals)
+        # default sigma ~0.02 rad (~1.15 deg)
+        self.imu_attitude_sigma = 0.02
+        self.R_imu_attitude = np.eye(3) * (self.imu_attitude_sigma ** 2)
+        # UWB outlier rejection / gating parameters
+        # Mahalanobis (NIS) gate for 3-DOF measurement (chi-square 95% ≈ 7.815)
+        self.uwb_nis_threshold = 7.815
+        # Absolute innovation (meters) fallback guard: reject if |y| > uwb_max_innov
+        self.uwb_max_innov = 2.0  # meters; tune to your system
+        # Diagnostic counter for rejected UWB updates
+        self.uwb_reject_count = 0
+        # Temporary covariance inflation settings applied when UWB is rejected.
+        # On rejection we inflate the error-state covariance by `uwb_inflation_factor`
+        # for `uwb_inflation_duration` seconds (restored after expiry or on next
+        # accepted measurement).
+        self.uwb_inflation_factor = 5.0
+        self.uwb_inflation_duration = 1.0  # seconds
+        self._uwb_inflated = False
+        self._uwb_inflation_expiry = 0.0
+        self._pre_inflation_P = None
 
         threading.Thread(target=self._run_loop, daemon=True).start()
+
+    # --- Temporary covariance inflation helpers ---
+    def _apply_uwb_inflation(self):
+        """Inflate the error-state covariance temporarily on UWB rejection."""
+        with self._lock:
+            import time
+            if not self._uwb_inflated:
+                # Save pre-inflation covariance so we can restore it later
+                try:
+                    self._pre_inflation_P = self.P.copy()
+                except Exception:
+                    self._pre_inflation_P = None
+                # Apply multiplicative inflation
+                self.P = self.P * float(self.uwb_inflation_factor)
+                self._uwb_inflated = True
+                self._uwb_inflation_expiry = time.time() + float(self.uwb_inflation_duration)
+            else:
+                # Already inflated: extend expiry window
+                self._uwb_inflation_expiry = time.time() + float(self.uwb_inflation_duration)
+
+    def _clear_uwb_inflation(self):
+        """Restore covariance if we previously inflated it."""
+        with self._lock:
+            if self._uwb_inflated and self._pre_inflation_P is not None:
+                # Restore the saved covariance
+                self.P = self._pre_inflation_P
+            # Clear inflation state regardless
+            self._uwb_inflated = False
+            self._uwb_inflation_expiry = 0.0
+            self._pre_inflation_P = None
 
     # --- Helpers to access parts of the full state
     @property
@@ -146,13 +181,15 @@ class KalmanStateEstimator:
         from Robot.subsystems.sensors.IMU import IMU
 
         with self._lock:
+            # expire temporary UWB inflation if its duration passed
+            if self._uwb_inflated and time.time() > self._uwb_inflation_expiry:
+                self._clear_uwb_inflation()
             dt = self.dt
 
             # Try to get accelerometer reading from IMU singleton
             accel_tuple = None
             accel_tuple = IMU().get_accel()
 
-            use_accel = False
             a_world = np.zeros(3)
 
             if accel_tuple is not None:
@@ -168,7 +205,7 @@ class KalmanStateEstimator:
                     a_world = a_lin
 
             # Integrate full state using accel if available, else constant-velocity
-            if use_accel:
+            if accel_tuple is not None:
                 # kinematic propagation with constant acceleration over dt
                 # pos = pos + v*dt + 0.5*a*dt^2
                 self.x[0:3] = self.pos + self.vel * dt + 0.5 * a_world * (dt ** 2)
@@ -243,6 +280,25 @@ class KalmanStateEstimator:
                 Sinv = np.linalg.inv(S)
             except np.linalg.LinAlgError:
                 return
+
+            # --- Outlier gating: Mahalanobis (NIS) + absolute innovation check ---
+            nis = float(y.T @ Sinv @ y)
+            abs_innov = float(np.linalg.norm(y))
+
+            if nis > self.uwb_nis_threshold or abs_innov > self.uwb_max_innov:
+                # reject this measurement as an outlier
+                self.uwb_reject_count += 1
+                print(f"KalmanStateEstimator: UWB measurement rejected (NIS={nis:.2f}, |y|={abs_innov:.2f} m)")
+                # Temporarily inflate covariance to reflect increased uncertainty
+                self._apply_uwb_inflation()
+                print(f"KalmanStateEstimator: inflated covariance x{self.uwb_inflation_factor} for {self.uwb_inflation_duration}s due to UWB rejection")
+                return
+
+            # If we had a temporary inflation active, clear it now that we
+            # accepted a good UWB measurement (we'll restore the normal P).
+            if self._uwb_inflated:
+                self._clear_uwb_inflation()
+
             K = self.P @ H.T @ Sinv
 
             dx = (K @ y).flatten()
@@ -321,8 +377,8 @@ class KalmanStateEstimator:
             H = np.zeros((3, 9))
             H[:, 6:9] = np.eye(3)
 
-            sigma = 0.02  # 0.05 rad (~2.9 deg)
-            R_meas = np.eye(3) * (sigma ** 2)
+            # Use preconfigured IMU attitude measurement covariance
+            R_meas = self.R_imu_attitude
 
             S = H @ self.P @ H.T + R_meas
             try:
