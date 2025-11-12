@@ -219,6 +219,52 @@ class IMU():
         
         threading.Thread(target=begin, daemon=True).start()
 
+    def _apply_median_window(self, raw_vals: list) -> list:
+        """Apply per-axis sliding-window median filter to raw_vals.
+
+        This updates the per-axis ring buffers stored in ``self._accel_windows``.
+        Behavior matches the previous inline implementation:
+          - append the new sample to the axis window
+          - while the window isn't full, return the raw sample
+          - once full, replace the sample with the median of the window
+          - optionally print a debug message when the raw value differs
+            from the median by more than 1e-2
+
+        Returns a new list with possibly-replaced values.
+        """
+        out = [0.0, 0.0, 0.0]
+        for i in range(3):
+            val = float(raw_vals[i])
+            win = self._accel_windows[i]
+            win.append(val)
+            # if window not yet full, use the raw sample
+            if len(win) < self._accel_median_window_size:
+                out[i] = val
+                continue
+            # compute median from window and use it as the filtered sample
+            med = float(np.median(np.asarray(list(win), dtype=float)))
+            if self._accel_median_debug and abs(val - med) > 1e-2:
+                print(f"IMU median replace axis={i} raw={val:.4f} med={med:.4f}")
+            out[i] = med
+        return out
+
+    def _rotate_vector_by_yaw(self, vec: Tuple[float, float, float], yaw_rad: float) -> Tuple[float, float, float]:
+        """Rotate a 3-vector by a yaw angle (radians) about Z axis.
+
+        Uses MathUtil to build a yaw quaternion and converts to a rotation
+        matrix. Expects and returns tuples in estimator/sensor axis order as
+        appropriate (consistent with how vectors are used elsewhere).
+        """
+        try:
+            v = np.asarray(vec, dtype=float)
+            q_yaw = MathUtil.euler_to_quat(np.array([0.0, 0.0, float(yaw_rad)]))
+            R = MathUtil.quat_to_rotmat(q_yaw)
+            res = R.dot(v)
+            return (float(res[0]), float(res[1]), float(res[2]))
+        except Exception:
+            # if anything goes wrong, return original vector
+            return (float(vec[0]), float(vec[1]), float(vec[2]))
+
 
     def update(self):
         # continuous update loop; keep reads outside lock and assign under lock
@@ -255,21 +301,8 @@ class IMU():
             # don't pass through the filter in one step.
             raw_vals = [float(accel[i]) for i in range(3)]
             filtered = [0.0, 0.0, 0.0]
-            # Simple sliding-window median filter: seed the window, then use median
-            for i in range(3):
-                val = raw_vals[i]
-                win = self._accel_windows[i]
-                # append raw sample to window
-                win.append(val)
-                # if window not yet full, use the raw sample
-                if len(win) < self._accel_median_window_size:
-                    raw_vals[i] = val
-                    continue
-                # compute median from window and use it as the filtered sample
-                med = float(np.median(np.asarray(list(win), dtype=float)))
-                if self._accel_median_debug and abs(val - med) > 1e-2:
-                    print(f"IMU median replace axis={i} raw={val:.4f} med={med:.4f}")
-                raw_vals[i] = med
+            # Simple sliding-window median filter (extracted to helper)
+            raw_vals = self._apply_median_window(raw_vals)
             # quick magnitude check
             try:
                 mag = math.sqrt(raw_vals[0]*raw_vals[0] + raw_vals[1]*raw_vals[1] + raw_vals[2]*raw_vals[2])
@@ -300,6 +333,11 @@ class IMU():
                 filtered[i] = lpf.update(val)
 
             accel = (filtered[0], filtered[1], filtered[2])
+            # apply yaw offset to accelerometer if configured
+            if self._is_offset_set and abs(self._yaw_offset_rad) > 1e-12:
+                with self._lock:
+                    yaw = float(self._yaw_offset_rad)
+                accel = self._rotate_vector_by_yaw(accel, yaw)
 
         if quat is not None:
             quat_arr = np.asarray(quat, dtype=float)
@@ -319,9 +357,15 @@ class IMU():
             if accel is not None:
                 self.acceleration = tuple(accel)
             if gyro is not None:
+                # apply yaw offset to gyroscope vector if configured
+                if self._is_offset_set and abs(self._yaw_offset_rad) > 1e-12:
+                    gyro = self._rotate_vector_by_yaw(gyro, float(self._yaw_offset_rad))
                 self.gyro = tuple(gyro)
 
             if magnetic is not None:
+                # apply yaw offset to magnetometer vector if configured
+                if self._is_offset_set and abs(self._yaw_offset_rad) > 1e-12:
+                    magnetic = self._rotate_vector_by_yaw(magnetic, float(self._yaw_offset_rad))
                 self.magnetic = tuple(magnetic)
                 # update last-mag timestamp only when we actually stored a magnetic sample
                 self._last_mag_time = time.time()
