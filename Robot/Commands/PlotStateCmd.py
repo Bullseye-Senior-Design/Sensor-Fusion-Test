@@ -10,8 +10,7 @@ from matplotlib import patches
 from matplotlib import transforms as mtransforms
 
 from Robot.subsystems.KalmanStateEstimator import KalmanStateEstimator
-from Robot.subsystems.sensors.IMU import IMU
-from Robot.subsystems.sensors.UWB import UWB 
+from Robot.subsystems.sim_sensors.SimUWB import SimUWB
 from Robot.MathUtil import MathUtil
 
 
@@ -53,8 +52,8 @@ class PlotStateCmd(Command):
 
         # estimator instance
         self.estimator = KalmanStateEstimator()
-        self.imu = IMU()
-        self.uwb = UWB()   # <-- ADDED: singleton UWB interface
+        # Use the simulated UWB playback for plotting in simulated mode
+        self.uwb = SimUWB()
 
     def initialize(self):
         # Create Tk window and Matplotlib canvas. We do NOT call mainloop;
@@ -209,31 +208,25 @@ class PlotStateCmd(Command):
                 if self.yaw_text is not None:
                     self.yaw_text.set_text("Yaw: --\N{DEGREE SIGN}")
 
-        # ADDED: update UWB dot positions from the UWB subsystem
-        uwb_positions = self.uwb.get_positions()  # iterable of positions (objects or sequences)
+        # Update UWB dot positions from the simulated UWB subsystem
+        try:
+            pos = self.uwb.get_latest_position()
+        except Exception:
+            pos = None
 
-        # collect all reported UWB x/y values into lists (mutable)
-        uwb_x_list = []
-        uwb_y_list = []
-        for uwb_pos in uwb_positions:
-            # prefer attribute access (uwb_pos.x, uwb_pos.y)
-            ux = float(uwb_pos.x)
-            uy = float(uwb_pos.y)
-
-            uwb_x_list.append(ux)
-            uwb_y_list.append(uy)
-
-        # if we have any valid UWB samples, compute their mean and plot
-        if uwb_x_list:
-            uwb_x = sum(uwb_x_list) / len(uwb_x_list)
-            uwb_y = sum(uwb_y_list) / len(uwb_y_list)
-            self.uwb_xs.append(uwb_x)
-            self.uwb_ys.append(uwb_y)
-            if len(self.uwb_xs) > self.max_points:
-                self.uwb_xs = self.uwb_xs[-self.max_points :]
-                self.uwb_ys = self.uwb_ys[-self.max_points :]
-            # update uwb_dots data
-            self.uwb_dots.set_data(self.uwb_xs, self.uwb_ys) # type: ignore
+        if pos is not None:
+            try:
+                uwb_x = float(pos.x)
+                uwb_y = float(pos.y)
+                self.uwb_xs.append(uwb_x)
+                self.uwb_ys.append(uwb_y)
+                if len(self.uwb_xs) > self.max_points:
+                    self.uwb_xs = self.uwb_xs[-self.max_points :]
+                    self.uwb_ys = self.uwb_ys[-self.max_points :]
+                self.uwb_dots.set_data(self.uwb_xs, self.uwb_ys) # type: ignore
+            except Exception:
+                # ignore malformed simulated readings
+                pass
 
     def end(self, interrupted):
         # close window and cleanup

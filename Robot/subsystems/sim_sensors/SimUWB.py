@@ -13,6 +13,7 @@ import threading
 import logging
 from dataclasses import dataclass
 from typing import Optional, List, Dict, Any, Tuple, cast
+import numpy
 
 from Robot.subsystems.KalmanStateEstimator import KalmanStateEstimator
 
@@ -45,7 +46,6 @@ class SimUWB:
         root = os.path.dirname(__file__)
         sim_files = os.path.join(root, 'sim_files')
 
-        self.anchors_csv = anchors_csv or os.path.join(sim_files, 'uwb_anchors.csv')
         # prefer a simulation positions file in sim_files; if not present fall back to example_output
         self.positions_csv = positions_csv or os.path.join(sim_files, 'uwb_positions.csv')
         if not os.path.exists(self.positions_csv):
@@ -74,53 +74,12 @@ class SimUWB:
 
         self.state_estimator = KalmanStateEstimator()
 
-        # load CSVs if available
-        try:
-            self._load_anchors()
-        except Exception:
-            logger.debug('No anchors CSV loaded or parse error')
-
         try:
             self._load_positions()
         except Exception:
             logger.debug('No positions CSV loaded or parse error')
-
-    def _load_anchors(self):
-        anchors = {}
-        with open(self.anchors_csv, newline='') as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                # row fields: timestamp,port,name,id,x,y,z,range
-                try:
-                    ts = float(row.get('timestamp') or 0.0)
-                except Exception:
-                    ts = time.time()
-
-                name = (row.get('name') or '').strip()
-                anchor_id = (row.get('id') or '').strip()
-                try:
-                    x = float(row.get('x')) if row.get('x') not in (None, '') else None
-                    y = float(row.get('y')) if row.get('y') not in (None, '') else None
-                    z = float(row.get('z')) if row.get('z') not in (None, '') else None
-                    rng = float(row.get('range')) if row.get('range') not in (None, '') else None
-                except Exception:
-                    x = y = z = rng = None
-
-                if anchor_id:
-                    anchors.setdefault(ts, [])
-                    if x is not None and y is not None and z is not None:
-                        anchors[ts].append({'name': name or anchor_id, 'id': anchor_id, 'position': (x, y, z), 'range': rng or 0.0})
-
-        # convert anchors dict to a sorted timeline
-        items = sorted(anchors.items(), key=lambda x: x[0])
-        self._anchors_timeline = items  # [(timestamp, [anchor,...]), ...]
-
-        # keep a merged latest anchors list for quick access as well
-        if items:
-            # use the last timestamp's anchors as baseline
-            self._latest_anchors = items[-1][1].copy()
-        else:
-            self._latest_anchors = None
+            
+        threading.Thread(target=self.start_continuous_reading, daemon=True).start()
 
     def _load_positions(self):
         # positions CSV columns like: timestamp,x1,y1,z1,quality1,x2,y2,z2,quality2,...
@@ -159,17 +118,7 @@ class SimUWB:
 
         logger.info('SimUWB disconnected')
 
-    def get_location_data(self) -> Tuple[Optional[List[Dict[str, Any]]], Optional[Position]]:
-        """Return the current anchors list and Position (or None, None)."""
-        with self.position_lock:
-            anchors = self.tag_info['anchors']
-            pos = self.tag_info['position']
-            # return shallow copy of anchors like real UWBTag
-            if anchors is None:
-                return None, None
-            return [a.copy() for a in anchors], pos
-
-    def start_continuous_reading(self, interval: float = None, debug: bool = False):
+    def start_continuous_reading(self, interval: float = 0.01, debug: bool = False):
         if self.is_reading:
             logger.warning('SimUWB already reading')
             return
@@ -196,58 +145,47 @@ class SimUWB:
                 ts = entry['timestamp']
                 row = entry['row']
 
-                # build anchors for this timestamp: prefer nearest anchors timeline entry not later than ts
-                anchors = None
-                if self._anchors_timeline:
-                    # find last anchors with timestamp <= ts
-                    anchors = None
-                    for a_ts, a_list in self._anchors_timeline:
-                        if a_ts <= ts:
-                            anchors = a_list
-                        else:
-                            break
-
-                # pick first available position block in the row
+                # Collect all available position blocks in the row and average them
+                # fields come in groups like (x1,y1,z1,quality1),(x2,y2,z2,quality2),...
                 pos = None
-                # fields come in groups (x1,y1,z1,quality1),(x2,y2,...)
-                # iterate groups
-                # find how many groups by parsing keys
-                keys = [k for k in row.keys() if k.startswith('x') or k.startswith('y') or k.startswith('z') or k.startswith('quality')]
-                # simpler: iterate group index starting at 1
-                for g in range(1, 10):
-                    try:
-                        xs = row.get(f'x{g}', '')
-                        ys = row.get(f'y{g}', '')
-                        zs = row.get(f'z{g}', '')
-                        qs = row.get(f'quality{g}', '')
-                        if xs not in (None, '') and ys not in (None, '') and zs not in (None, ''):
-                            try:
-                                x = float(xs)
-                                y = float(ys)
-                                z = float(zs)
-                                q = int(float(qs)) if qs not in (None, '') and qs != '' else 0
-                                pos = Position(x=x, y=y, z=z, quality=q, timestamp=ts)
-                                break
-                            except Exception:
-                                continue
-                    except Exception:
-                        break
+                pos_samples = []
+                # allow a generous number of groups in case CSV has many
+                for g in range(1, 50):
+                    xs = row.get(f'x{g}', '')
+                    ys = row.get(f'y{g}', '')
+                    zs = row.get(f'z{g}', '')
+                    qs = row.get(f'quality{g}', '')
+                    if xs not in (None, '') and ys not in (None, '') and zs not in (None, ''):
+                        try:
+                            x = float(xs)
+                            y = float(ys)
+                            z = float(zs)
+                            q = int(float(qs)) if qs not in (None, '') and qs != '' else 0
+                            pos_samples.append((x, y, z, q))
+                        except Exception:
+                            # skip malformed group
+                            continue
+
+                if pos_samples:
+                    nx = sum(p[0] for p in pos_samples) / len(pos_samples)
+                    ny = sum(p[1] for p in pos_samples) / len(pos_samples)
+                    nz = sum(p[2] for p in pos_samples) / len(pos_samples)
+                    nq = int(round(sum(p[3] for p in pos_samples) / len(pos_samples)))
+                    pos = Position(x=nx, y=ny, z=nz, quality=nq, timestamp=ts)
+                    print(f"SimUWB position at ts={ts}: x={nx}, y={ny}, z={nz}, quality={nq}")
 
                 # update tag_info
                 with self.position_lock:
-                    self.tag_info['anchors'] = anchors.copy() if anchors is not None else None
                     self.tag_info['position'] = pos
 
-                # if we have a valid position, feed the EKF like real device
+                # if we have a valid (possibly averaged) position, feed the EKF like a real device
                 if pos is not None:
-                    try:
-                        tag_pos_meas = __import__('numpy').array([pos.x, pos.y, pos.z], dtype=float)
-                        try:
-                            self.state_estimator.update_uwb_range(tag_pos_meas)
-                        except Exception:
-                            logger.debug('EKF update skipped in SimUWB')
-                    except Exception:
-                        pass
+                    tag_pos_meas = numpy.array([pos.x, pos.y, pos.z], dtype=float)
+                    # Send position to EKF with no offset
+                    print("Feeding EKF with position:", tag_pos_meas)
+                    self.state_estimator.update_uwb_range(tag_pos_meas, None, False)
+                else:
+                    print("No valid position data available for EKF update.")
 
                 # advance index and sleep according to desired interval
                 idx += 1

@@ -154,10 +154,11 @@ class SimIMU():
             self.gyro = None if any(v is None for v in (gx, gy, gz)) else (gx, gy, gz) # type: ignore
             self.magnetic = None if any(v is None for v in (mx, my, mz)) else (mx, my, mz) # type: ignore
             self.quat = sensor_quat
+            # ensure we pass an ndarray or None to the estimator to satisfy its type signature
+            q_meas = np.asarray(sensor_quat, dtype=float) if sensor_quat is not None else None
+            self.state_estimator.update_imu_attitude(q_meas)
             if self.magnetic is not None:
                 self._last_mag_time = time.time()
-        
-        
 
         # advance index and sleep using timestamp delta when available
         next_idx = self._idx + 1

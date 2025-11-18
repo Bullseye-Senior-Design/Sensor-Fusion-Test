@@ -131,14 +131,14 @@ class KalmanStateEstimator:
           until a valid sample arrives.
         """
         # import IMU here to avoid circular import at module load time
-        from Robot.subsystems.sensors.IMU import IMU
+        from Robot.subsystems.sim_sensors.SimIMU import SimIMU
 
         with self._lock:
             dt = self.dt
 
             # Try to get accelerometer reading from IMU singleton
             accel_tuple = None
-            accel_tuple = IMU().get_accel()
+            accel_tuple = SimIMU().get_accel()
 
             a_world = np.zeros(3)
 

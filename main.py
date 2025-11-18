@@ -1,7 +1,6 @@
 from Debug import Debug
 from Robot.Robot import Robot
 from structure.RobotState import RobotState
-from Robot.subsystems.sensors.UWB import UWB
 
 import time
 
@@ -43,7 +42,6 @@ def main():
             time.sleep(0.01)
     except KeyboardInterrupt:
         print("Shutting down robot...")
-        UWB().stop_all()
         
 if __name__ == "__main__":
     main()
