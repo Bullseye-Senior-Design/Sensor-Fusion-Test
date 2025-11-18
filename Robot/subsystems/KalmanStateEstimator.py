@@ -141,6 +141,8 @@ class KalmanStateEstimator:
             accel_tuple = SimIMU().get_accel()
 
             a_world = np.zeros(3)
+            a_world_to_print = None
+            acc_to_print = accel_tuple
 
             if accel_tuple is not None:
                 a_b = np.asarray(accel_tuple, dtype=float).reshape(3)
@@ -153,6 +155,8 @@ class KalmanStateEstimator:
                     a_lin = a_w - GRAVITY
 
                     a_world = a_lin
+                    a_world_to_print = a_world.copy()
+
 
             # Integrate full state using accel if available, else constant-velocity
             if accel_tuple is not None:
@@ -178,6 +182,10 @@ class KalmanStateEstimator:
 
             # Covariance propagate
             self.P = Phi @ self.P @ Phi.T + Qd
+        print("Predict got accel:", acc_to_print)
+        if a_world_to_print is not None:
+            print("Predict using accel:", a_world_to_print)
+        
 
     def update_uwb_range(self, tag_pos_meas: np.ndarray, tag_offset: np.ndarray | None = None, use_offset: bool = True):
         """EKF update using the fused UWB tag world position (POS), not per-anchor ranges.
