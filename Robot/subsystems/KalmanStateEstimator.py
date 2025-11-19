@@ -151,8 +151,7 @@ class KalmanStateEstimator:
                     q = MathUtil.quat_normalize(self.quat)
                     R = MathUtil.quat_to_rotmat(q)  # body->world
                     a_w = R @ a_b
-                    # subtract gravity (world frame)
-                    a_lin = a_w - GRAVITY
+                    a_lin = a_w + GRAVITY
 
                     a_world = a_lin
                     a_world_to_print = a_world.copy()
@@ -182,9 +181,10 @@ class KalmanStateEstimator:
 
             # Covariance propagate
             self.P = Phi @ self.P @ Phi.T + Qd
-        print("Predict got accel:", acc_to_print)
+        #print("Predict got accel:", acc_to_print)
         if a_world_to_print is not None:
-            print("Predict using accel:", a_world_to_print)
+            #print("Predict using accel:", a_world_to_print)
+            pass
         
 
     def update_uwb_range(self, tag_pos_meas: np.ndarray, tag_offset: np.ndarray | None = None, use_offset: bool = True):

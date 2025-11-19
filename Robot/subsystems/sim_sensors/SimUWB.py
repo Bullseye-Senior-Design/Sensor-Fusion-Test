@@ -176,7 +176,7 @@ class SimUWB:
 
                 # update tag_info
                 with self.position_lock:
-                    self.tag_info['position'] = pos
+                    self.tag_info['position'] = pos # type: ignore
 
                 # if we have a valid (possibly averaged) position, feed the EKF like a real device
                 if pos is not None:

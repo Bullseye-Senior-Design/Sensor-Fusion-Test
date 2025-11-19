@@ -155,7 +155,8 @@ class SimIMU():
             self.magnetic = None if any(v is None for v in (mx, my, mz)) else (mx, my, mz) # type: ignore
             self.quat = sensor_quat
             # ensure we pass an ndarray or None to the estimator to satisfy its type signature
-            q_meas = np.asarray(sensor_quat, dtype=float) if sensor_quat is not None else None
+            q_meas_sen = np.asarray(sensor_quat, dtype=float)
+            q_meas = MathUtil.quat_sensor_to_estimator(q_meas_sen)  # validate conversion
             self.state_estimator.update_imu_attitude(q_meas)
             if self.magnetic is not None:
                 self._last_mag_time = time.time()
@@ -177,6 +178,7 @@ class SimIMU():
                 sleep_for = self.interval
 
         self._idx = next_idx
+        print(f"sleep_for={sleep_for:.3f}s")
         time.sleep(sleep_for)
 
     # Public API methods to match real IMU
