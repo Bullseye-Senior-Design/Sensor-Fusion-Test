@@ -115,8 +115,7 @@ class KalmanStateEstimator:
             if sleep_duration > 0:
                 time.sleep(sleep_duration)
 
-    # Replace the existing predict, update_mag and _inject_error_state methods with these.
-
+    # TODO: Look into adding control inputs to the predict step    
     def predict(self):
         """Predict step using IMU acceleration (body frame) when available.
 
