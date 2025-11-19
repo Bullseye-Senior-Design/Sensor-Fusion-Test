@@ -151,7 +151,7 @@ class KalmanStateEstimator:
                     R = MathUtil.quat_to_rotmat(q)  # body->world
                     a_w = R @ a_b
                     # subtract gravity (world frame)
-                    a_lin = a_w - GRAVITY
+                    a_lin = a_w + GRAVITY
 
                     a_world = a_lin
 

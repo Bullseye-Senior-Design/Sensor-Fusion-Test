@@ -66,7 +66,7 @@ class IMU():
         # per-axis ring buffers for median filter
         self._accel_windows = [deque(maxlen=self._accel_median_window_size) for _ in range(3)]
         # debug flag to print when a raw value differs strongly from the median
-        self._accel_median_debug = True
+        self._accel_median_debug = False
         
         # timestamp of last magnetic sample
         self._last_mag_time = 0.0
