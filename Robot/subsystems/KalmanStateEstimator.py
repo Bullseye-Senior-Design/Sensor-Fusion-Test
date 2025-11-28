@@ -181,7 +181,7 @@ class KalmanStateEstimator:
 
             # Covariance propagate
             self.P = Phi @ self.P @ Phi.T + Qd
-        #print("Predict got accel:", acc_to_print)
+        print("Predict got accel:", acc_to_print)
         if a_world_to_print is not None:
             #print("Predict using accel:", a_world_to_print)
             pass

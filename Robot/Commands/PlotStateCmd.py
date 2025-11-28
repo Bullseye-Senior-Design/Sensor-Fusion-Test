@@ -12,6 +12,7 @@ from matplotlib import transforms as mtransforms
 from Robot.subsystems.KalmanStateEstimator import KalmanStateEstimator
 from Robot.subsystems.sim_sensors.SimUWB import SimUWB
 from Robot.MathUtil import MathUtil
+import time
 
 
 class PlotStateCmd(Command):
@@ -134,6 +135,9 @@ class PlotStateCmd(Command):
         self.canvas.draw()
         widget = self.canvas.get_tk_widget()
         widget.pack(side=tk.TOP, fill=tk.BOTH, expand=1)
+        
+        self._plot_period = 0.2  # 5 Hz
+        self._last_plot_time = 0.0
 
         # keep running until closed
         self._running = True
@@ -179,15 +183,17 @@ class PlotStateCmd(Command):
                 self.last_dot.set_data([x_last], [y_last])  # type: ignore
 
         # draw and process Tk events in a non-blocking way
-        try:
-            self.canvas.draw_idle() # type: ignore
-            # If draw_idle doesn't immediately draw in some backends, force draw
-            self.canvas.draw() # type: ignore
-            self.root.update_idletasks()
-            self.root.update()
-        except Exception:
-            # If window was closed by user, mark command finished
-            self._running = False
+        now = time.time()
+        if now - self._last_plot_time >= self._plot_period and self.canvas is not None:
+            self.canvas.draw_idle()
+            # optionally do a single draw() if you need synchronous update
+            self.canvas.draw()
+            try:
+                self.root.update_idletasks()
+                self.root.update()
+            except Exception:
+                self._running = False
+            self._last_plot_time = now
 
         # update top-down yaw view (do this after drawing to avoid flicker)
         if self.ax_top is not None:

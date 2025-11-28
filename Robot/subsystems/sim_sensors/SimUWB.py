@@ -172,7 +172,7 @@ class SimUWB:
                     nz = sum(p[2] for p in pos_samples) / len(pos_samples)
                     nq = int(round(sum(p[3] for p in pos_samples) / len(pos_samples)))
                     pos = Position(x=nx, y=ny, z=nz, quality=nq, timestamp=ts)
-                    print(f"SimUWB position at ts={ts}: x={nx}, y={ny}, z={nz}, quality={nq}")
+                    # print(f"SimUWB position at ts={ts}: x={nx}, y={ny}, z={nz}, quality={nq}")
 
                 # update tag_info
                 with self.position_lock:
@@ -182,7 +182,7 @@ class SimUWB:
                 if pos is not None:
                     tag_pos_meas = numpy.array([pos.x, pos.y, pos.z], dtype=float)
                     # Send position to EKF with no offset
-                    print("Feeding EKF with position:", tag_pos_meas)
+                    # print("Feeding EKF with position:", tag_pos_meas)
                     self.state_estimator.update_uwb_range(tag_pos_meas, None, False)
                 else:
                     print("No valid position data available for EKF update.")
