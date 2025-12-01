@@ -241,6 +241,115 @@ class KalmanStateEstimator:
             I = np.eye(9)
             self.P = (I - K @ H) @ self.P @ (I - K @ H).T + K @ R_meas @ K.T
 
+    def update_uwb_anchor_ranges(self, anchors: list, tag_offset: np.ndarray | None = None, use_offset: bool = True):
+        """EKF update using per-anchor UWB ranges.
+
+        Measurement model for each anchor i:
+            z_i = || p + R(q) @ o_b - a_i || + v_i
+        where a_i is anchor position in world frame and o_b is optional tag offset
+        in the body frame. The error-state is [dp,dv,dtheta] and we linearize
+        the range measurement wrt position and small-angle attitude error.
+        """
+        if not anchors:
+            return
+
+        with self._lock:
+            anchor_pos_list = []
+            meas_ranges = []
+            for a in anchors:
+                try:
+                    a_pos = a.get('position', None)
+                    r = a.get('range', None)
+                    if a_pos is None or r is None:
+                        continue
+                    a_pos_arr = np.asarray(a_pos, dtype=float).reshape(3)
+                    r = float(r)
+                    if not np.all(np.isfinite(a_pos_arr)) or not np.isfinite(r):
+                        continue
+                    anchor_pos_list.append(a_pos_arr)
+                    meas_ranges.append(r)
+                except Exception:
+                    continue
+
+            if len(anchor_pos_list) == 0:
+                return
+
+            anchor_pos = np.vstack(anchor_pos_list)   # (N,3)
+            z = np.asarray(meas_ranges, dtype=float).reshape(-1, 1)  # (N,1)
+
+            p = self.pos  # (3,)
+            q = MathUtil.quat_normalize(self.quat)
+            Rb2w = MathUtil.quat_to_rotmat(q)  # body->world
+
+            o_b = np.zeros(3)
+            if use_offset and tag_offset is not None:
+                o_b = np.asarray(tag_offset, dtype=float).reshape(3)
+
+            # tag world position estimate (where the tag is predicted to be)
+            tag_world = p + Rb2w @ o_b  # (3,)
+
+            N = anchor_pos.shape[0]
+            r_pred = np.zeros((N, 1))
+            H = np.zeros((N, 9))  # rows: measurements, cols: error-state [pos(3), vel(3), att_err(3)]
+
+            def skew(v):
+                return np.array([[0, -v[2], v[1]],
+                                 [v[2], 0, -v[0]],
+                                 [-v[1], v[0], 0]])
+
+            for i in range(N):
+                a_i = anchor_pos[i]  # (3,)
+                s = tag_world - a_i   # vector from anchor to tag
+                r_i = np.linalg.norm(s)
+                if r_i <= 1e-6:
+                    # skip degenerate anchor (too close / invalid)
+                    continue
+                u = (s / r_i).reshape(1, 3)  # (1,3)
+
+                # derivative wrt pos is unit vector
+                H[i, 0:3] = u
+
+                # vel part remains zeros
+
+                # attitude part if offset present
+                if np.any(o_b):
+                    # d(R o_b)/dtheta ≈ - R @ skew(o_b)
+                    H_att = - (u @ (Rb2w @ skew(o_b)))  # shape (1,3)
+                    H[i, 6:9] = H_att
+
+                r_pred[i, 0] = r_i
+
+            # keep only valid rows (r_pred > 0)
+            valid_rows = np.where(r_pred.flatten() > 0)[0]
+            if valid_rows.size == 0:
+                return
+
+            H = H[valid_rows, :]   # (M,9)
+            r_pred = r_pred[valid_rows, :].reshape(-1, 1)  # (M,1)
+            z = z[valid_rows, :]   # (M,1)
+            M = H.shape[0]
+
+            R_meas = np.eye(M) * self.R_uwb_range
+
+            S = H @ self.P @ H.T + R_meas
+            try:
+                Sinv = np.linalg.inv(S)
+            except np.linalg.LinAlgError:
+                return
+
+            K = self.P @ H.T @ Sinv  # (9, M)
+
+            y = (z - r_pred).reshape(M, 1)
+
+            dx = (K @ y).flatten()  # (9,)
+
+            # inject and update P
+            self._inject_error_state(dx)
+
+            # Joseph form
+            I = np.eye(9)
+            self.P = (I - K @ H) @ self.P @ (I - K @ H).T + K @ R_meas @ K.T
+
     def _inject_error_state(self, dx: np.ndarray):
         """Inject 9-vector error state into the full state x and renormalize quaternion.
 

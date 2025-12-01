@@ -352,26 +352,24 @@ class UWBTag:
             while self.is_reading:
                 anchors, position = self.get_location_data()
 
-                # store anchors if provided (for diagnostics/visualization only)
+                # If we have per-anchor measurements, inject them into the EKF as ranges
                 if anchors:
+                    # store anchors for external use
                     self.tag_info.anchors = anchors
                     if debug:
                         self.print_anchor_info()
 
-                # Use fused POS (world) position for EKF update instead of per-anchor ranges
+                    tag_offset_vec = None if self.tag_offset is None else np.array(self.tag_offset, dtype=float)
+                    try:
+                        # inject per-anchor ranges into Kalman filter
+                        self.state_estimator.update_uwb_anchor_ranges(anchors, tag_offset=tag_offset_vec)
+                    except Exception as e:
+                        logger.debug(f"EKF UWB anchor-range update skipped: {e}")
+
+                # keep the fused POS around for diagnostics but do not use it for EKF updates
                 if position:
                     with self.position_lock:
                         self.tag_info.position = position
-
-                    # Build measurement vector and optional tag offset
-                    tag_pos_meas = np.array([position.x, position.y, position.z], dtype=float)
-                    tag_offset_vec = None if self.tag_offset is None else np.array(self.tag_offset, dtype=float)
-
-                    try:
-                        self.state_estimator.update_uwb_range(tag_pos_meas, tag_offset=tag_offset_vec)
-                    except Exception as e:
-                        logger.debug(f"EKF UWB POS update skipped: {e}")
-
                     if debug:
                         self.print_position(position)
 
