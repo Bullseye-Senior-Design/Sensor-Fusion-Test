@@ -192,6 +192,8 @@ class KalmanStateEstimator:
         Args:
             tag_pos_meas: (3,) measured tag position in world frame [m]
             tag_offset:   (3,) tag offset in body frame from robot center [m]; None => [0,0,0]
+                +x : tag is forward of the robot center
+                +y : tag is to the robot's left side
         """        
         with self._lock:
             z = np.asarray(tag_pos_meas, dtype=float).reshape(3)
@@ -268,11 +270,10 @@ class KalmanStateEstimator:
             q_new = MathUtil.quat_normalize(q_new)
             self.x[6:10] = q_new
 
-    def update_imu_attitude(self, q_meas: np.ndarray | None = None):
+    def update_imu_attitude(self, q_meas: np.ndarray):
         """EKF attitude update using an external IMU rotation estimate.
 
-        Provide either a quaternion q_meas = [qx,qy,qz,qw] or Euler angles
-        euler_rpy = [roll, pitch, yaw] in radians. The measurement residual is
+        Provide either a quaternion q_meas = [qx,qy,qz,qw] The measurement residual is
         the small-angle vector from the quaternion error:
 
             q_err = q_meas ⊗ conj(q_est)  (ensure qw >= 0)
@@ -283,10 +284,7 @@ class KalmanStateEstimator:
 
         Args:
             q_meas: quaternion [qx,qy,qz,qw] (preferred).
-            euler_rpy: roll, pitch, yaw in radians (used if q_meas is None).
         """
-        if q_meas is None:
-            return
 
         with self._lock:
             q_est = MathUtil.quat_normalize(self.quat)
