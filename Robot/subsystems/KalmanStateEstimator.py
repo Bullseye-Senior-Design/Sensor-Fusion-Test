@@ -178,69 +178,6 @@ class KalmanStateEstimator:
             # Covariance propagate
             self.P = Phi @ self.P @ Phi.T + Qd
 
-    def update_uwb_range(self, tag_pos_meas: np.ndarray, tag_offset: np.ndarray | None = None, use_offset: bool = True):
-        """EKF update using the fused UWB tag world position (POS), not per-anchor ranges.
-
-        Measurement model:
-            z (3x1) = h(x) + v,  h(x) = p + R(q) @ o_b
-        where
-            p is robot position in world (state),
-            R(q) is body->world rotation from quaternion,
-            o_b is tag offset in body frame (default 0),
-            v ~ N(0, R_meas).
-
-        Args:
-            tag_pos_meas: (3,) measured tag position in world frame [m]
-            tag_offset:   (3,) tag offset in body frame from robot center [m]; None => [0,0,0]
-        """        
-        with self._lock:
-            z = np.asarray(tag_pos_meas, dtype=float).reshape(3)
-            if not np.all(np.isfinite(z)):
-                return
-
-            # Decide whether to apply the offset
-            o_b = np.zeros(3)
-            if use_offset and tag_offset is not None:
-                o_b = np.asarray(tag_offset, dtype=float).reshape(3)
-
-            # rotation matrix from body to world
-            q = MathUtil.quat_normalize(self.quat)
-            R = MathUtil.quat_to_rotmat(q)
-
-            # prediction h(x)
-            h = self.pos + R @ o_b
-            y = z - h
-
-            # Jacobian H (3x9): [ I3  03  R[o]_x ] wrt error-state [pos, vel, att_err]
-            H = np.zeros((3, 9))
-            H[:, 0:3] = np.eye(3)
-
-            if np.any(o_b):
-                def skew(v):
-                    return np.array([[0, -v[2], v[1]],
-                                     [v[2], 0, -v[0]],
-                                     [-v[1], v[0], 0]])
-                H[:, 6:9] = R @ skew(o_b)
-
-            R_meas = np.eye(3) * self.R_uwb_range
-
-            S = H @ self.P @ H.T + R_meas
-            try:
-                Sinv = np.linalg.inv(S)
-            except np.linalg.LinAlgError:
-                return
-
-            K = self.P @ H.T @ Sinv
-
-            dx = (K @ y).flatten()
-
-            # inject and update P under lock
-            self._inject_error_state(dx)
-
-            # Joseph form for numerical stability (9x9)
-            I = np.eye(9)
-            self.P = (I - K @ H) @ self.P @ (I - K @ H).T + K @ R_meas @ K.T
-
     def update_uwb_anchor_ranges(self, anchors: list, tag_offset: np.ndarray | None = None, use_offset: bool = True):
         """EKF update using per-anchor UWB ranges.
 
