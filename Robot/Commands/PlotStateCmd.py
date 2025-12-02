@@ -137,7 +137,7 @@ class PlotStateCmd(Command):
         widget = self.canvas.get_tk_widget()
         widget.pack(side=tk.TOP, fill=tk.BOTH, expand=1)
         
-        self._plot_period = 0.2  # seconds between plot updates
+        self._plot_period = 0.5  # seconds between plot updates
         self._last_plot_time = 0.0
 
         # keep running until closed
