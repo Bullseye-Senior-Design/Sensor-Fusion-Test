@@ -1,3 +1,4 @@
+import math
 from typing import List, Tuple, Optional, Dict, Any
 from .UWBTag import UWBTag, Position
 import logging
@@ -58,6 +59,18 @@ class UWB:
             if pos is not None:
                 positions.append(pos)
         return positions
+    
+    def get_angle(self) -> float:
+        """Compine the positions of all tags to compute the robot's heading angle. Returns angle in radians."""
+        positions = self.get_positions()
+        if len(positions) < 2:
+            raise ValueError("At least two UWB tags are required to compute heading angle.")
+        
+        # Calculate the angle between the first two tags
+        dx = positions[1].x - positions[0].x
+        dy = positions[1].y - positions[0].y
+        angle = math.atan2(dy, dx)  # Angle in radians
+        return angle
 
     def connect_all(self) -> List[Tuple[str, bool]]:
         """Attempt to connect all tags. Returns list of (port, success)."""
