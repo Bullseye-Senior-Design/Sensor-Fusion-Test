@@ -55,6 +55,10 @@ class AlignIMUToWorldCmd(Command):
         # Get instantaneous UWB yaw (radians)
         uwb = UWB()
         uwb_yaw = uwb.get_angle()
+        if uwb_yaw is None:
+            logger.warning("AlignIMUToWorldCmd: insufficient UWB tags to compute heading; skipping this cycle")
+            self._start_time = time.time()  # reset start time to avoid premature timeout
+            return
 
         # Get IMU yaw in radians (IMU.get_euler returns degrees: (yaw, roll, pitch))
         imu = IMU()
