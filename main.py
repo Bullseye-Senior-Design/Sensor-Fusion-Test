@@ -13,9 +13,16 @@ def main():
 
     robot.robot_init()
     robot_state.enable_teleop()
+
+    previous_time = time.time()
     
     try:
         while True:        
+            current_time = time.time()
+            delta_time = current_time - previous_time
+            previous_time = current_time
+            print(f"Delta Time: {delta_time:.4f} seconds")
+
             # Run periodic functions
             robot.robot_periodic()
             
