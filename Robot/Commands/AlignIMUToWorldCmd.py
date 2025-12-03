@@ -20,7 +20,7 @@ class AlignIMUToWorldCmd(Command):
     headings align. The estimator runs until `duration` elapses or the
     residual is stable for several samples.
     """
-    def __init__(self, tau: float = 0.5, duration: float = 10.0, tol_rad: float = 0.01, min_samples: int = 20):
+    def __init__(self, tau: float = 5.0, duration: float = 30.0, tol_rad: float = 0.01, min_samples: int = 20):
         super().__init__()
         # time constant (seconds) for bias adaptation
         self.tau = float(tau)
@@ -64,12 +64,15 @@ class AlignIMUToWorldCmd(Command):
             #  logger.warning("AlignIMUToWorldCmd: insufficient UWB tags to compute heading; skipping this cycle")
             self._start_time = time.time()  # reset start time to avoid premature timeout
             return
-
+        
         # Get IMU yaw in radians (IMU.get_euler returns degrees: (yaw, roll, pitch))
         imu = IMU()
         imu_euler = imu.get_euler()
         imu_yaw_deg = float(imu_euler[0])
         imu_yaw_rad = math.radians(imu_yaw_deg)
+
+        logger.info(f"AlignIMUToWorldCmd: UWB yaw = {math.degrees(uwb_yaw):.3f} deg")
+        logger.info(f"AlignIMUToWorldCmd: IMU yaw = {imu_yaw_deg:.3f} deg (with offset {math.degrees(self._bias):.3f} deg)")
 
         # residual between measured UWB yaw and corrected IMU yaw
         residual = _wrap_angle(uwb_yaw - imu_yaw_rad)
@@ -81,10 +84,9 @@ class AlignIMUToWorldCmd(Command):
         self._bias += alpha * residual
 
         # apply bias to IMU (degrees)
-        try:
-            imu.set_yaw_offset(math.degrees(self._bias))
-        except Exception:
-            logger.exception("Failed to apply yaw offset to IMU")
+        logger.info(f"AlignIMUToWorldCmd: applying yaw offset {math.degrees(self._bias):.3f} deg")
+        imu.set_yaw_offset(math.degrees(self._bias))
+
 
         # bookkeeping
         self._samples += 1

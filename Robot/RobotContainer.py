@@ -18,4 +18,4 @@ class RobotContainer:
         LogDataCmd().schedule()
         PlotStateCmd().schedule()
         # ZeroIMUCmd().schedule()
-        AlignIMUToWorldCmd(tau=5.0, duration=10.0).schedule()
+        AlignIMUToWorldCmd(tau=0.5, duration=30.0).schedule()
