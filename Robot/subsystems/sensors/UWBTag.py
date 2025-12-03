@@ -297,7 +297,6 @@ class UWBTag:
                     tag_offset_vec = None if self.tag_offset is None else np.array(self.tag_offset, dtype=float)
 
                     # EKF update    
-                    logger.info(f"EKF UWB POS update with measurement: {tag_pos_meas}, offset: {tag_offset_vec}")
                     try:
                         self.state_estimator.update_uwb_range(tag_pos_meas, tag_offset=tag_offset_vec)
                     except Exception as e:
