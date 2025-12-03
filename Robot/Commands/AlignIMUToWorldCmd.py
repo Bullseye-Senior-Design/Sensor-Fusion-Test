@@ -43,6 +43,11 @@ class AlignIMUToWorldCmd(Command):
         self._last_time = self._start_time
         self._samples = 0
         self._stable_count = 0
+        imu = IMU()
+        try:
+            self._bias = float(getattr(imu, "_yaw_offset_rad", 0.0))
+        except Exception:
+            self._bias = 0.0
         # Don't reset the IMU yaw offset here; we'll adapt from current
         logger.info(f"AlignIMUToWorldCmd: starting yaw-bias estimation (tau={self.tau}s, duration={self.duration}s)")
 
@@ -70,7 +75,7 @@ class AlignIMUToWorldCmd(Command):
         logger.info(f"AlignIMUToWorldCmd: IMU yaw = {imu_yaw_deg:.3f} deg (with offset {math.degrees(self._bias):.3f} deg)")
 
         # residual between measured UWB yaw and corrected IMU yaw
-        residual = _wrap_angle(uwb_yaw - (imu_yaw_rad + self._bias))
+        residual = _wrap_angle(uwb_yaw - imu_yaw_rad)
 
         # compute alpha from tau
         alpha = dt / (self.tau + dt)
