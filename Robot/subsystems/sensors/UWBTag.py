@@ -358,6 +358,8 @@ class UWBTag:
                     if debug:
                         self.print_anchor_info()
 
+                # logger.info(f"UWBTag: Read position data {position}")
+
                 # Use fused POS (world) position for EKF update instead of per-anchor ranges
                 if position:
                     with self.position_lock:
@@ -367,6 +369,8 @@ class UWBTag:
                     tag_pos_meas = np.array([position.x, position.y, position.z], dtype=float)
                     tag_offset_vec = None if self.tag_offset is None else np.array(self.tag_offset, dtype=float)
 
+                    # EKF update    
+                    logger.info(f"EKF UWB POS update with measurement: {tag_pos_meas}, offset: {tag_offset_vec}")
                     try:
                         self.state_estimator.update_uwb_range(tag_pos_meas, tag_offset=tag_offset_vec)
                     except Exception as e:

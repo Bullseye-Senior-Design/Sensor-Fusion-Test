@@ -56,7 +56,7 @@ class AlignIMUToWorldCmd(Command):
         uwb = UWB()
         uwb_yaw = uwb.get_angle()
         if uwb_yaw is None:
-            logger.warning("AlignIMUToWorldCmd: insufficient UWB tags to compute heading; skipping this cycle")
+            #  logger.warning("AlignIMUToWorldCmd: insufficient UWB tags to compute heading; skipping this cycle")
             self._start_time = time.time()  # reset start time to avoid premature timeout
             return
 
