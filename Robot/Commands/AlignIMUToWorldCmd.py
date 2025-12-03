@@ -20,7 +20,7 @@ class AlignIMUToWorldCmd(Command):
     headings align. The estimator runs until `duration` elapses or the
     residual is stable for several samples.
     """
-    def __init__(self, tau: float = 5.0, duration: float = 10.0, tol_rad: float = 0.01, min_samples: int = 20):
+    def __init__(self, tau: float = 0.5, duration: float = 10.0, tol_rad: float = 0.01, min_samples: int = 20):
         super().__init__()
         # time constant (seconds) for bias adaptation
         self.tau = float(tau)
@@ -43,6 +43,11 @@ class AlignIMUToWorldCmd(Command):
         self._last_time = self._start_time
         self._samples = 0
         self._stable_count = 0
+        imu = IMU()
+        try:
+            self._bias = float(getattr(imu, "_yaw_offset_rad", 0.0))
+        except Exception:
+            self._bias = 0.0
         # Don't reset the IMU yaw offset here; we'll adapt from current
         logger.info(f"AlignIMUToWorldCmd: starting yaw-bias estimation (tau={self.tau}s, duration={self.duration}s)")
 
@@ -67,7 +72,7 @@ class AlignIMUToWorldCmd(Command):
         imu_yaw_rad = math.radians(imu_yaw_deg)
 
         # residual between measured UWB yaw and corrected IMU yaw
-        residual = _wrap_angle(uwb_yaw - (imu_yaw_rad + self._bias))
+        residual = _wrap_angle(uwb_yaw - imu_yaw_rad)
 
         # compute alpha from tau
         alpha = dt / (self.tau + dt)
