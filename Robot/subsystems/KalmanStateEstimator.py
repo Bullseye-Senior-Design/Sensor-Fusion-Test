@@ -45,6 +45,9 @@ class KalmanStateEstimator:
         # Reentrant lock to allow safe concurrent access from multiple threads
         self._lock = threading.RLock()
 
+        # Flag to track if filter has been initialized with first UWB measurement
+        self.is_initialized = False
+
         # Full state: pos(3), vel(3), quat(4) => 10 elements
         self.x = np.zeros(10)
         # init quat as identity
@@ -110,7 +113,9 @@ class KalmanStateEstimator:
         next_time = time.time()
         while True:
             next_time += self.dt
-            self.predict()
+            # Only run predict if filter has been initialized
+            if self.is_initialized:
+                self.predict()
             sleep_duration = next_time - time.time()
             if sleep_duration > 0:
                 time.sleep(sleep_duration)
@@ -130,6 +135,10 @@ class KalmanStateEstimator:
         - After several consecutive rejections, fall back to constant-velocity
           until a valid sample arrives.
         """
+        # Don't predict if not yet initialized
+        if not self.is_initialized:
+            return
+
         # import IMU here to avoid circular import at module load time
         from Robot.subsystems.sensors.IMU import IMU
 
@@ -198,6 +207,12 @@ class KalmanStateEstimator:
         with self._lock:
             z = np.asarray(tag_pos_meas, dtype=float).reshape(3)
             if not np.all(np.isfinite(z)):
+                return
+
+            # Initialize filter with first UWB measurement
+            if not self.is_initialized:
+                self.x[0:3] = z  # Set initial position to first UWB measurement
+                self.is_initialized = True
                 return
 
             # Decide whether to apply the offset
@@ -273,7 +288,7 @@ class KalmanStateEstimator:
     def update_imu_attitude(self, q_meas: np.ndarray):
         """EKF attitude update using an external IMU rotation estimate.
 
-        Provide either a quaternion q_meas = [qx,qy,qz,qw] The measurement residual is
+        Provide a quaternion q_meas = [qx,qy,qz,qw] The measurement residual is
         the small-angle vector from the quaternion error:
 
             q_err = q_meas ⊗ conj(q_est)  (ensure qw >= 0)
@@ -285,6 +300,9 @@ class KalmanStateEstimator:
         Args:
             q_meas: quaternion [qx,qy,qz,qw] (preferred).
         """
+        # Don't update attitude if not yet initialized
+        if not self.is_initialized:
+            return
 
         with self._lock:
             q_est = MathUtil.quat_normalize(self.quat)

@@ -148,40 +148,42 @@ class PlotStateCmd(Command):
         if not self._running or self.root is None:
             return
 
-        # get current position from EKF
-        try:
-            pos = self.estimator.pos  # numpy array [x,y,z]
-        except Exception as e:
-            # If estimator fails for any reason, just skip this update
-            print(f"PlotStateCmd: failed to read estimator: {e}")
-            return
+        # Only plot EKF data if the filter has been initialized
+        if self.estimator.is_initialized:
+            # get current position from EKF
+            try:
+                pos = self.estimator.pos  # numpy array [x,y,z]
+            except Exception as e:
+                # If estimator fails for any reason, just skip this update
+                print(f"PlotStateCmd: failed to read estimator: {e}")
+                return
 
-        # safe conversion (in case of None or invalid values)
-        try:
-            x = float(pos[0])
-        except Exception:
-            x = np.nan
-        try:
-            y = float(pos[1])
-        except Exception:
-            y = np.nan
+            # safe conversion (in case of None or invalid values)
+            try:
+                x = float(pos[0])
+            except Exception:
+                x = np.nan
+            try:
+                y = float(pos[1])
+            except Exception:
+                y = np.nan
 
-        self.xs.append(x)
-        self.ys.append(y)
-        if len(self.xs) > self.max_points:
-            self.xs = self.xs[-self.max_points :]
-            self.ys = self.ys[-self.max_points :]
+            self.xs.append(x)
+            self.ys.append(y)
+            if len(self.xs) > self.max_points:
+                self.xs = self.xs[-self.max_points :]
+                self.ys = self.ys[-self.max_points :]
 
-        # update line data and autoscale
-        self.line.set_data(self.xs, self.ys) # type: ignore
-        self.ax.relim() # type: ignore
-        self.ax.autoscale_view() # type: ignore
+            # update line data and autoscale
+            self.line.set_data(self.xs, self.ys) # type: ignore
+            self.ax.relim() # type: ignore
+            self.ax.autoscale_view() # type: ignore
 
-        # update latest point (green)
-        if self.xs and self.ys:
-            x_last, y_last = self.xs[-1], self.ys[-1]
-            if np.isfinite(x_last) and np.isfinite(y_last):
-                self.last_dot.set_data([x_last], [y_last])  # type: ignore
+            # update latest point (green)
+            if self.xs and self.ys:
+                x_last, y_last = self.xs[-1], self.ys[-1]
+                if np.isfinite(x_last) and np.isfinite(y_last):
+                    self.last_dot.set_data([x_last], [y_last])  # type: ignore
 
         # draw and process Tk events in a non-blocking way
         now = time.time()
@@ -197,7 +199,8 @@ class PlotStateCmd(Command):
             self._last_plot_time = now
 
         # update top-down yaw view (do this after drawing to avoid flicker)
-        if self.ax_top is not None:
+        # Only update if estimator is initialized
+        if self.ax_top is not None and self.estimator.is_initialized:
             euler = self.estimator.euler
             yaw = np.rad2deg(euler[2])
 
