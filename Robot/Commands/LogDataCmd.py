@@ -126,24 +126,26 @@ class LogDataCmd(Command):
         except Exception as e:
             print(f"UWB read error: {e}")
 
-        # 2) State estimator
+        # 2) State estimator (only log if initialized)
         try:
             kf = KalmanStateEstimator()
-            state = kf.get_state()
-            # estimate euler from estimator for convenience
-            euler = kf.euler  # numpy array [roll, pitch, yaw] in radians
-            yaw = float(euler[2]) * 180.0 / 3.141592653589793
-            pitch = float(euler[1]) * 180.0 / 3.141592653589793
-            roll = float(euler[0]) * 180.0 / 3.141592653589793
-            state_file = _make_log_filename('state_estimator')
-            self.save_state_to_csv(state, yaw, pitch, roll, state_file, timestamp=ts)
-            # Also log covariance matrix (EKF P)
-            try:
-                cov_file = _make_log_filename('ekf_covariance', 'txt')
-                if hasattr(kf, 'P'):
-                    self.save_covariance_to_txt(kf.P, cov_file, timestamp=ts)
-            except Exception as e:
-                print(f"Covariance save error: {e}")
+            # Only log state if the filter has been initialized with first UWB measurement
+            if kf.is_initialized:
+                state = kf.get_state()
+                # estimate euler from estimator for convenience
+                euler = kf.euler  # numpy array [roll, pitch, yaw] in radians
+                yaw = float(euler[2]) * 180.0 / 3.141592653589793
+                pitch = float(euler[1]) * 180.0 / 3.141592653589793
+                roll = float(euler[0]) * 180.0 / 3.141592653589793
+                state_file = _make_log_filename('state_estimator')
+                self.save_state_to_csv(state, yaw, pitch, roll, state_file, timestamp=ts)
+                # Also log covariance matrix (EKF P)
+                try:
+                    cov_file = _make_log_filename('ekf_covariance', 'txt')
+                    if hasattr(kf, 'P'):
+                        self.save_covariance_to_txt(kf.P, cov_file, timestamp=ts)
+                except Exception as e:
+                    print(f"Covariance save error: {e}")
         except Exception as e:
             print(f"State estimator read error: {e}")
 
