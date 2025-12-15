@@ -5,5 +5,7 @@ class UWBTagInfo:
 
 class Constants:
     # UWB Tag Data
-    uwb_tag_data = [ UWBTagInfo(port="/dev/ttyACM0", offset=(-13.335 / 2 / 100, -22.86 / 2 / 100, 0.0)),
-                    UWBTagInfo(port="/dev/ttyACM1", offset=(13.335 / 2 / 100, 22.86 / 2 / 100, 0.0)) ]
+    # +x : tag is forward of the robot center
+    # +y : tag is to the robot's left side
+    uwb_tag_data = [ UWBTagInfo(port="/dev/ttyACM0", offset=(-24.77 / 2 / 100, 22.225 / 2 / 100, 0.0)), # back left tag
+                    UWBTagInfo(port="/dev/ttyACM1", offset=(24.77 / 2 / 100, -22.225 / 2 / 100, 0.0)) ] # front right tag
