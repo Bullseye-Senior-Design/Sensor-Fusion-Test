@@ -17,5 +17,5 @@ class RobotContainer:
     def begin_data_log(self):
         LogDataCmd().schedule()
         PlotStateCmd().schedule()
-        # ZeroIMUCmd().schedule()
-        AlignIMUToWorldCmd(tau=5.0, duration=30.0).schedule()
+        ZeroIMUCmd().schedule()
+        # AlignIMUToWorldCmd(tau=0.5, duration=30.0).schedule()
