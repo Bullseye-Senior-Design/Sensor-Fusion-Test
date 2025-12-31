@@ -22,8 +22,6 @@ class Encoder:
             cls._instance = super().__new__(cls)
         return cls._instance
     
-    
-    
     def start(self, pin: int, active_high: bool = True, pull_up: bool = True, debounce_ms: int = 50,
                  edge: str = 'both'):
         """Create a proximity sensor reader.
@@ -41,9 +39,17 @@ class Encoder:
         self.debounce_ms = debounce_ms
         self.edge = edge.lower()
 
+        self.interval = 1  # update interval in seconds
         self._running = False
         self._lock = threading.Lock()
         self._last_event_time = 0.0
+        self._count = 0
+        self._velocity = 0.0  # m/s
+        self._last_update_time = time.time()
+        
+        # Wheel parameters (customize these)
+        self.wheel_circumference = 0.5  # meters (adjust to your wheel)
+        self.counts_per_revolution = 20  # encoder pulses per wheel rotation
         
         self.run()
 
@@ -79,10 +85,29 @@ class Encoder:
 
         GPIO.add_event_detect(self.pin, gedge, callback=self._gpio_callback, bouncetime=self.debounce_ms)
         logger.info(f"Started monitoring GPIO {self.pin} (active_high={self.active_high})")
+        
+        def _update_loop():
+            while True:
+                self.update()
+        
+        threading.Thread(target=_update_loop, daemon=True).start()
 
     def update(self):
-        """Update internal state (if any)"""
-        pass
+        """Update velocity estimate from encoder counts"""
+        with self._lock:
+            current_time = time.time()
+            dt = current_time - self._last_update_time
+            
+            if dt > 0:
+                # Calculate velocity from count changes
+                distance = (self._count / self.counts_per_revolution) * self.wheel_circumference
+                self._velocity = distance / dt
+                
+                # Reset for next interval
+                self._count = 0
+                self._last_update_time = current_time
+        
+        time.sleep(self.interval)
 
     def stop(self):
         """Stop monitoring and cleanup"""
@@ -104,4 +129,9 @@ class Encoder:
         with self._lock:
             c = self._count
         return c
+
+    def get_velocity(self) -> float:
+        """Return current velocity estimate in m/s (forward direction)"""
+        with self._lock:
+            return self._velocity
 

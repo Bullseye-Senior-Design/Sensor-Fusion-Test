@@ -74,6 +74,8 @@ class KalmanStateEstimator:
         # default sigma ~0.02 rad (~1.15 deg)
         self.imu_attitude_sigma = 0.04
         self.R_imu_attitude = np.eye(3) * (self.imu_attitude_sigma ** 2)
+        # Encoder velocity measurement noise (m/s)^2
+        self.R_encoder_velocity = (0.05 ** 2)  # 5 cm/s sigma
         
         threading.Thread(target=self._run_loop, daemon=True).start()
 
@@ -313,6 +315,66 @@ class KalmanStateEstimator:
             # Joseph form for numerical stability (9x9)
             I = np.eye(9)
             self.P = (I - K @ H) @ self.P @ (I - K @ H).T + K @ R_meas @ K.T
+
+    def update_encoder_velocity(self, v_enc: float):
+        """EKF update using encoder velocity measurement (forward speed in body frame).
+
+        Measurement model:
+            z = v_enc (scalar, forward velocity in body frame)
+            h(x) = e_x^T @ R^T @ v_world
+        where R is body->world rotation, e_x = [1,0,0] is body forward axis.
+
+        Args:
+            v_enc: measured forward velocity in m/s (positive = forward motion)
+        """
+        # Don't update if not yet initialized
+        if not self.is_initialized:
+            return
+
+        with self._lock:
+            z = float(v_enc)
+            if not np.isfinite(z):
+                return
+
+            # Get rotation matrix (body to world)
+            q = MathUtil.quat_normalize(self.quat)
+            R = MathUtil.quat_to_rotmat(q)
+            R_T = R.T  # world to body
+
+            # Predicted body-frame forward velocity
+            # h = [1,0,0] @ R^T @ v_world = first row of R^T times v_world
+            v_world = self.vel
+            h = R_T[0, :] @ v_world  # scalar
+
+            y = z - h  # innovation (scalar)
+
+            # Jacobian H (1x9): wrt error-state [pos, vel, att_err]
+            H = np.zeros((1, 9))
+            # ∂h/∂vel = R^T[0,:]
+            H[0, 3:6] = R_T[0, :]
+            
+            # ∂h/∂θ: derivative of (R^T @ v) w.r.t. attitude
+            # For small angle δθ: δ(R^T @ v) ≈ -R^T @ [v]_x @ δθ
+            # So ∂h/∂θ = -e_x^T @ R^T @ [v]_x = -R^T[0,:] @ [v]_x
+            def skew(v):
+                return np.array([[0, -v[2], v[1]],
+                                 [v[2], 0, -v[0]],
+                                 [-v[1], v[0], 0]])
+            H[0, 6:9] = -R_T[0, :] @ skew(v_world)
+
+            R_meas = self.R_encoder_velocity  # scalar variance
+
+            S = H @ self.P @ H.T + R_meas  # scalar
+            K = (self.P @ H.T) / S  # 9x1
+
+            dx = (K * y).flatten()
+
+            # inject and update P under lock
+            self._inject_error_state(dx)
+
+            # Joseph form for numerical stability (9x9)
+            I = np.eye(9)
+            self.P = (I - K @ H) @ self.P @ (I - K @ H).T + (K * R_meas) @ K.T
 
     def _inject_error_state(self, dx: np.ndarray):
         """Inject 9-vector error state into the full state x and renormalize quaternion.
