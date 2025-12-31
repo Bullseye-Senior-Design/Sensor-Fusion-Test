@@ -258,33 +258,6 @@ class KalmanStateEstimator:
             I = np.eye(9)
             self.P = (I - K @ H) @ self.P @ (I - K @ H).T + K @ R_meas @ K.T
 
-    def _inject_error_state(self, dx: np.ndarray):
-        """Inject 9-vector error state into the full state x and renormalize quaternion.
-
-        dx layout: [dp(3), dv(3), dtheta(3)]
-        """
-        if dx.shape[0] != 9:
-            raise ValueError("dx must be length 9")
-        with self._lock:
-            # sanitize non-finite
-            if not np.all(np.isfinite(dx)):
-                dx = np.nan_to_num(dx, nan=0.0, posinf=0.0, neginf=0.0)
-
-            dp = dx[0:3]
-            dv = dx[3:6]
-            dtheta = dx[6:9]
-
-            # pos
-            self.x[0:3] = self.pos + dp
-            # vel
-            self.x[3:6] = self.vel + dv
-            # attitude: apply small-angle
-            dq = MathUtil.small_angle_quat(dtheta)
-            q = self.quat
-            q_new = MathUtil.quat_mul(dq, q)
-            q_new = MathUtil.quat_normalize(q_new)
-            self.x[6:10] = q_new
-
     def update_imu_attitude(self, q_meas: np.ndarray):
         """EKF attitude update using an external IMU rotation estimate.
 
@@ -340,3 +313,30 @@ class KalmanStateEstimator:
             # Joseph form for numerical stability (9x9)
             I = np.eye(9)
             self.P = (I - K @ H) @ self.P @ (I - K @ H).T + K @ R_meas @ K.T
+
+    def _inject_error_state(self, dx: np.ndarray):
+        """Inject 9-vector error state into the full state x and renormalize quaternion.
+
+        dx layout: [dp(3), dv(3), dtheta(3)]
+        """
+        if dx.shape[0] != 9:
+            raise ValueError("dx must be length 9")
+        with self._lock:
+            # sanitize non-finite
+            if not np.all(np.isfinite(dx)):
+                dx = np.nan_to_num(dx, nan=0.0, posinf=0.0, neginf=0.0)
+
+            dp = dx[0:3]
+            dv = dx[3:6]
+            dtheta = dx[6:9]
+
+            # pos
+            self.x[0:3] = self.pos + dp
+            # vel
+            self.x[3:6] = self.vel + dv
+            # attitude: apply small-angle
+            dq = MathUtil.small_angle_quat(dtheta)
+            q = self.quat
+            q_new = MathUtil.quat_mul(dq, q)
+            q_new = MathUtil.quat_normalize(q_new)
+            self.x[6:10] = q_new

@@ -90,6 +90,9 @@ class UWBTag:
             bool: True if connection successful, False otherwise
                    logger.info("Disconnected from DWM1001-DEV")
         """
+        # Ensure any existing connection is cleaned up first
+        self.disconnect()
+        
         try:
             self.serial_connection = serial.Serial(
                 port=self.port,
@@ -207,10 +210,18 @@ class UWBTag:
                     # malformed anchor block -> stop parsing anchors
                     break
 
+                # Override anchor position if anchor_pos_override is provided
+                anchor_position = (ax, ay, az)
+                if self.anchors_pos_override is not None:
+                    for override_id, override_x, override_y, override_z in self.anchors_pos_override:
+                        if int(anchor_id) == override_id:
+                            anchor_position = (override_x, override_y, override_z)
+                            break
+                            
                 anchors.append({
                     'name': name,
                     'id': anchor_id,
-                    'position': (ax, ay, az),
+                    'position': anchor_position,
                     'range': rng,
                 })
 
