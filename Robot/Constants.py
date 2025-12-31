@@ -4,9 +4,12 @@ class UWBTagInfo:
         self.offset = offset
 
 class Constants:
-    # UWB Tag Data
-    uwb_tag_data = [ UWBTagInfo(port="/dev/ttyACM0", offset=(-13.335 / 2 / 100, -22.86 / 2 / 100, 0.0)),
-                    UWBTagInfo(port="/dev/ttyACM1", offset=(13.335 / 2 / 100, 22.86 / 2 / 100, 0.0)) ]
-    
     # Encoder Constants
-    back_right_encoder_pin = 7
+    back_right_encoder_pin = 4
+    
+    # For the tag offsets:
+    # +x : tag is forward of the robot center
+    # +y : tag is to the robot's left side
+    uwb_tag_data = [ UWBTagInfo(port="/dev/ttyACM0", offset=(-24.77 / 2 / 100, 22.225 / 2 / 100, 0.0)), # back left tag
+                    UWBTagInfo(port="/dev/ttyACM1", offset=(24.77 / 2 / 100, -22.225 / 2 / 100, 0.0)) ] # front right tag
+

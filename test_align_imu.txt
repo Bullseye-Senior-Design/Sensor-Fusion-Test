@@ -1,0 +1,40 @@
+Unstable is defined as observed changes in degrees greater than 30 deg
+
+At -90 got: (unstable)
+2025-12-02 15:32:16,125 - INFO - AlignIMUToWorldCmd: UWB yaw = -130.610 deg
+2025-12-02 15:32:16,127 - INFO - AlignIMUToWorldCmd: IMU yaw = -140.423 deg (with offset -62.249 deg)
+2025-12-02 15:32:16,127 - INFO - AlignIMUToWorldCmd: applying yaw offset -61.570 deg
+2025-12-02 15:32:16,128 - INFO - AlignIMUToWorldCmd completed: applied yaw offset -61.570 deg
+
+at -180 got: (stable)
+
+2025-12-02 15:37:44,834 - INFO - AlignIMUToWorldCmd: UWB yaw = 118.572 deg
+2025-12-02 15:37:44,835 - INFO - AlignIMUToWorldCmd: IMU yaw = 120.132 deg (with offset -100.161 deg)
+2025-12-02 15:37:44,835 - INFO - AlignIMUToWorldCmd: applying yaw offset -100.272 deg
+2025-12-02 15:37:44,835 - INFO - AlignIMUToWorldCmd completed: applied yaw offset -100.272 deg
+
+at 90 got: (unstable)
+
+2025-12-02 15:39:18,519 - INFO - AlignIMUToWorldCmd: UWB yaw = 55.603 deg
+2025-12-02 15:39:18,520 - INFO - AlignIMUToWorldCmd: IMU yaw = 50.847 deg (with offset -116.968 deg)
+2025-12-02 15:39:18,520 - INFO - AlignIMUToWorldCmd: applying yaw offset -116.677 deg
+2025-12-02 15:39:18,520 - INFO - AlignIMUToWorldCmd completed: applied yaw offset -116.677 deg
+
+at 0 got: (unstable)
+2025-12-02 15:41:52,469 - INFO - AlignIMUToWorldCmd: UWB yaw = -23.716 deg
+2025-12-02 15:41:52,473 - INFO - AlignIMUToWorldCmd: IMU yaw = -13.536 deg (with offset -93.970 deg)
+2025-12-02 15:41:52,474 - INFO - AlignIMUToWorldCmd: applying yaw offset -94.805 deg
+2025-12-02 15:41:52,474 - INFO - AlignIMUToWorldCmd completed: applied yaw offset -94.805 deg
+
+
+with standard deviation of 10 cm in UWB get expected error in angle of:
+angle = atan2(y2 - y1, x2 - x1)
+
+10sqrt(2) = sqrt(10^2 + 10^2) for delta x and y
+because uncertainty in differences
+
+uncertainty in atan2
+10sqrt(2) / d where d is distance between the two points
+
+so with distance x = 22.86 and y = 13.335
+we get an error of 0.534 rads or 30 degrees

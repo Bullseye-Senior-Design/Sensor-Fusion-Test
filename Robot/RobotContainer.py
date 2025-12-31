@@ -4,9 +4,9 @@ from structure.commands.SequentialCommandGroup import SequentialCommandGroup
 from Robot.subsystems.sensors.UWB import UWB
 from Robot.subsystems.sensors.IMU import IMU
 from Robot.subsystems.sensors.Encoder import Encoder
-from Robot.Commands.LogStateCmd import LogDataCmd
+from Robot.Commands.LogDataCmd import LogDataCmd
 from Robot.Commands.PlotStateCmd import PlotStateCmd
-from Robot.Commands.AlignIMUCmd import AlignIMUCmd
+from Robot.Commands.AlignIMUToWorldCmd import AlignIMUToWorldCmd
 from Robot.Commands.ZeroIMUCmd import ZeroIMUCmd
 
 class RobotContainer:
@@ -21,3 +21,4 @@ class RobotContainer:
         LogDataCmd().schedule()
         PlotStateCmd().schedule()
         ZeroIMUCmd().schedule()
+        # AlignIMUToWorldCmd(tau=0.5, duration=30.0).schedule()

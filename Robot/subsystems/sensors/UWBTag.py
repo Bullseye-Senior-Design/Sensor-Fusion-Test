@@ -82,129 +82,59 @@ class UWBTag:
             # registration failure shouldn't block normal operation
             logger.debug("Failed to register atexit disconnect handler")
         
-    def connect(self, max_retries: int = 5, retry_delay: float = 1.0) -> bool:
+    def connect(self) -> bool:
         """
         Establish serial connection to DWM1001-DEV tag with retry/backoff.
 
         Returns:
             bool: True if connection successful, False otherwise
+                   logger.info("Disconnected from DWM1001-DEV")
         """
-        # If we already hold an object, try to close it first (defensive)
+        # Ensure any existing connection is cleaned up first
+        self.disconnect()
+        
         try:
-            if self.serial_connection is not None:
-                try:
-                    if getattr(self.serial_connection, 'is_open', False):
-                        logger.debug("Closing existing serial connection object before re-opening")
-                        try:
-                            self.serial_connection.close()
-                        except Exception as e:
-                            logger.debug(f"Error closing existing serial connection: {e}")
-                finally:
-                    self.serial_connection = None
-        except Exception:
-            # continue regardless
-            pass
+            self.serial_connection = serial.Serial(
+                port=self.port,
+                baudrate=self.baudrate,
+                timeout=self.timeout,
+                parity=serial.PARITY_NONE,
+                stopbits=serial.STOPBITS_ONE,
+                bytesize=serial.EIGHTBITS
+            )
+            
+            # Wait for connection to stabilize
+            time.sleep(2)
+            
+            # Test connection by sending shell command
+            self.serial_connection.write(b'\r')
+            time.sleep(0.5)
+            self.serial_connection.write(b'\r')
+            time.sleep(0.5)
+            
+            self.is_connected = True
+            logger.info(f"Successfully connected to DWM1001-DEV on {self.port}")
+            return True
+            
+        except serial.SerialException as e:
+            logger.error(f"Failed to connect to {self.port}: {e}")
+            return False
 
-        attempt = 0
-        while attempt < max_retries:
-            attempt += 1
-            try:
-                logger.debug(f"Opening serial port {self.port} (attempt {attempt}/{max_retries})")
-                self.serial_connection = serial.Serial(
-                    port=self.port,
-                    baudrate=self.baudrate,
-                    timeout=self.timeout,
-                    parity=serial.PARITY_NONE,
-                    stopbits=serial.STOPBITS_ONE,
-                    bytesize=serial.EIGHTBITS
-                )
-
-                # wait a moment for the device/driver to settle
-                time.sleep(1.5)
-
-                # attempt a tiny handshake but don't fail entirely on write errors
-                try:
-                    if getattr(self.serial_connection, 'is_open', False):
-                        try:
-                            self.serial_connection.reset_input_buffer()
-                        except Exception:
-                            pass
-                        try:
-                            self.serial_connection.reset_output_buffer()
-                        except Exception:
-                            pass
-                        try:
-                            self.serial_connection.write(b'\r')
-                            time.sleep(0.2)
-                        except Exception:
-                            logger.debug("Handshake write failed but serial opened successfully")
-
-                except Exception:
-                    # ignore any minor errors in handshake
-                    pass
-
-                self.is_connected = True
-                logger.info(f"Successfully connected to DWM1001-DEV on {self.port}")
-                return True
-
-            except serial.SerialException as e:
-                logger.warning(f"Could not open serial port {self.port} (attempt {attempt}): {e}")
-                # wait and retry
-                time.sleep(retry_delay)
-            except Exception as e:
-                logger.error(f"Unexpected error opening serial port: {e}")
-                time.sleep(retry_delay)
-
-        logger.error(f"Failed to open serial port {self.port} after {max_retries} attempts")
-        return False
     
     def disconnect(self):
-        """Close the serial connection (defensive/tolerant)."""
-        # Stop reading thread first (best-effort)
-        try:
-            self.stop_reading()
-        except Exception as e:
-            logger.debug(f"stop_reading() raised while disconnecting: {e}")
-
-        if not self.serial_connection:
-            self.is_connected = False
-            return
-
-        try:
-            # best-effort: tell the device we're exiting
+        """Close the serial connection"""
+        self.stop_reading()
+        if self.serial_connection and self.serial_connection.is_open:
+            # Exit shell mode before closing
             try:
-                if getattr(self.serial_connection, 'is_open', False):
-                    try:
-                        self.serial_connection.write(b'quit\r\n')
-                        time.sleep(0.2)
-                    except Exception:
-                        # ignore write errors during shutdown
-                        logger.debug("Ignored write error while sending quit during disconnect")
-            except Exception:
-                pass
-
-            try:
-                if getattr(self.serial_connection, 'is_open', False):
-                    # flush buffers if possible then close
-                    try:
-                        self.serial_connection.reset_input_buffer()
-                    except Exception:
-                        pass
-                    try:
-                        self.serial_connection.reset_output_buffer()
-                    except Exception:
-                        pass
-                    try:
-                        self.serial_connection.close()
-                    except Exception as e:
-                        logger.debug(f"Error while closing serial connection: {e}")
-            except Exception as e:
-                logger.debug(f"Error during disconnect cleanup: {e}")
-            finally:
-                self.serial_connection = None
-        finally:
-            self.is_connected = False
+                self.serial_connection.write(b'quit\r\n')
+                time.sleep(0.5)
+            except:
+                self.serial_connection.close()
+                logger.debug("Serial connection closed without quitting shell")
             logger.info("Disconnected from DWM1001-DEV")
+        self.is_connected = False
+        
     
     def get_location_data(self) -> Tuple[Optional[List[Dict[str, Any]]], Optional[Position]]:
         """
@@ -280,10 +210,18 @@ class UWBTag:
                     # malformed anchor block -> stop parsing anchors
                     break
 
+                # Override anchor position if anchor_pos_override is provided
+                anchor_position = (ax, ay, az)
+                if self.anchors_pos_override is not None:
+                    for override_id, override_x, override_y, override_z in self.anchors_pos_override:
+                        if int(anchor_id) == override_id:
+                            anchor_position = (override_x, override_y, override_z)
+                            break
+                            
                 anchors.append({
                     'name': name,
                     'id': anchor_id,
-                    'position': (ax, ay, az),
+                    'position': anchor_position,
                     'range': rng,
                 })
 
@@ -358,6 +296,8 @@ class UWBTag:
                     if debug:
                         self.print_anchor_info()
 
+                # logger.info(f"UWBTag: Read position data {position}")
+
                 # Use fused POS (world) position for EKF update instead of per-anchor ranges
                 if position:
                     with self.position_lock:
@@ -367,6 +307,7 @@ class UWBTag:
                     tag_pos_meas = np.array([position.x, position.y, position.z], dtype=float)
                     tag_offset_vec = None if self.tag_offset is None else np.array(self.tag_offset, dtype=float)
 
+                    # EKF update    
                     try:
                         self.state_estimator.update_uwb_range(tag_pos_meas, tag_offset=tag_offset_vec)
                     except Exception as e:

@@ -45,6 +45,9 @@ class KalmanStateEstimator:
         # Reentrant lock to allow safe concurrent access from multiple threads
         self._lock = threading.RLock()
 
+        # Flag to track if filter has been initialized with first UWB measurement
+        self.is_initialized = False
+
         # Full state: pos(3), vel(3), quat(4) => 10 elements
         self.x = np.zeros(10)
         # init quat as identity
@@ -110,7 +113,9 @@ class KalmanStateEstimator:
         next_time = time.time()
         while True:
             next_time += self.dt
-            self.predict()
+            # Only run predict if filter has been initialized
+            if self.is_initialized:
+                self.predict()
             sleep_duration = next_time - time.time()
             if sleep_duration > 0:
                 time.sleep(sleep_duration)
@@ -130,6 +135,10 @@ class KalmanStateEstimator:
         - After several consecutive rejections, fall back to constant-velocity
           until a valid sample arrives.
         """
+        # Don't predict if not yet initialized
+        if not self.is_initialized:
+            return
+
         # import IMU here to avoid circular import at module load time
         from Robot.subsystems.sensors.IMU import IMU
 
@@ -192,10 +201,18 @@ class KalmanStateEstimator:
         Args:
             tag_pos_meas: (3,) measured tag position in world frame [m]
             tag_offset:   (3,) tag offset in body frame from robot center [m]; None => [0,0,0]
+                +x : tag is forward of the robot center
+                +y : tag is to the robot's left side
         """        
         with self._lock:
             z = np.asarray(tag_pos_meas, dtype=float).reshape(3)
             if not np.all(np.isfinite(z)):
+                return
+
+            # Initialize filter with first UWB measurement
+            if not self.is_initialized:
+                self.x[0:3] = z  # Set initial position to first UWB measurement
+                self.is_initialized = True
                 return
 
             # Decide whether to apply the offset
@@ -241,38 +258,10 @@ class KalmanStateEstimator:
             I = np.eye(9)
             self.P = (I - K @ H) @ self.P @ (I - K @ H).T + K @ R_meas @ K.T
 
-    def _inject_error_state(self, dx: np.ndarray):
-        """Inject 9-vector error state into the full state x and renormalize quaternion.
-
-        dx layout: [dp(3), dv(3), dtheta(3)]
-        """
-        if dx.shape[0] != 9:
-            raise ValueError("dx must be length 9")
-        with self._lock:
-            # sanitize non-finite
-            if not np.all(np.isfinite(dx)):
-                dx = np.nan_to_num(dx, nan=0.0, posinf=0.0, neginf=0.0)
-
-            dp = dx[0:3]
-            dv = dx[3:6]
-            dtheta = dx[6:9]
-
-            # pos
-            self.x[0:3] = self.pos + dp
-            # vel
-            self.x[3:6] = self.vel + dv
-            # attitude: apply small-angle
-            dq = MathUtil.small_angle_quat(dtheta)
-            q = self.quat
-            q_new = MathUtil.quat_mul(dq, q)
-            q_new = MathUtil.quat_normalize(q_new)
-            self.x[6:10] = q_new
-
-    def update_imu_attitude(self, q_meas: np.ndarray | None = None):
+    def update_imu_attitude(self, q_meas: np.ndarray):
         """EKF attitude update using an external IMU rotation estimate.
 
-        Provide either a quaternion q_meas = [qx,qy,qz,qw] or Euler angles
-        euler_rpy = [roll, pitch, yaw] in radians. The measurement residual is
+        Provide a quaternion q_meas = [qx,qy,qz,qw] The measurement residual is
         the small-angle vector from the quaternion error:
 
             q_err = q_meas ⊗ conj(q_est)  (ensure qw >= 0)
@@ -283,9 +272,9 @@ class KalmanStateEstimator:
 
         Args:
             q_meas: quaternion [qx,qy,qz,qw] (preferred).
-            euler_rpy: roll, pitch, yaw in radians (used if q_meas is None).
         """
-        if q_meas is None:
+        # Don't update attitude if not yet initialized
+        if not self.is_initialized:
             return
 
         with self._lock:
@@ -324,3 +313,30 @@ class KalmanStateEstimator:
             # Joseph form for numerical stability (9x9)
             I = np.eye(9)
             self.P = (I - K @ H) @ self.P @ (I - K @ H).T + K @ R_meas @ K.T
+
+    def _inject_error_state(self, dx: np.ndarray):
+        """Inject 9-vector error state into the full state x and renormalize quaternion.
+
+        dx layout: [dp(3), dv(3), dtheta(3)]
+        """
+        if dx.shape[0] != 9:
+            raise ValueError("dx must be length 9")
+        with self._lock:
+            # sanitize non-finite
+            if not np.all(np.isfinite(dx)):
+                dx = np.nan_to_num(dx, nan=0.0, posinf=0.0, neginf=0.0)
+
+            dp = dx[0:3]
+            dv = dx[3:6]
+            dtheta = dx[6:9]
+
+            # pos
+            self.x[0:3] = self.pos + dp
+            # vel
+            self.x[3:6] = self.vel + dv
+            # attitude: apply small-angle
+            dq = MathUtil.small_angle_quat(dtheta)
+            q = self.quat
+            q_new = MathUtil.quat_mul(dq, q)
+            q_new = MathUtil.quat_normalize(q_new)
+            self.x[6:10] = q_new
