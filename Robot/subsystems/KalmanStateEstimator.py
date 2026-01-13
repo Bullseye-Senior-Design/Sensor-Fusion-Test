@@ -104,12 +104,15 @@ class KalmanStateEstimator:
                 quat=tuple(self.x[6:10]),
             )
     
+
+    
     def _run_loop(self):
         """Background thread to run predict at fixed dt intervals."""
         import time
+        from Debug import Debug
         next_time = time.time()
         while True:
-            next_time += self.dt
+            next_time += self.dt / Debug.time_scale
             self.predict()
             sleep_duration = next_time - time.time()
             if sleep_duration > 0:
@@ -131,43 +134,14 @@ class KalmanStateEstimator:
           until a valid sample arrives.
         """
         # import IMU here to avoid circular import at module load time
-        from Robot.subsystems.sim_sensors.SimIMU import SimIMU
+        from Debug import Debug
 
         with self._lock:
-            dt = self.dt
-
-            # Try to get accelerometer reading from IMU singleton
-            accel_tuple = None
-            accel_tuple = SimIMU().get_accel()
-
-            a_world = np.zeros(3)
-            a_world_to_print = None
-            acc_to_print = accel_tuple
-
-            if accel_tuple is not None:
-                a_b = np.asarray(accel_tuple, dtype=float).reshape(3)
-                if np.all(np.isfinite(a_b)):
-                    # rotate accel to world frame and remove gravity to get linear acceleration
-                    q = MathUtil.quat_normalize(self.quat)
-                    R = MathUtil.quat_to_rotmat(q)  # body->world
-                    a_w = R @ a_b
-                    a_lin = a_w + GRAVITY
-
-                    a_world = a_lin
-                    a_world_to_print = a_world.copy()
-
-
-            # Integrate full state using accel if available, else constant-velocity
-            if accel_tuple is not None:
-                # kinematic propagation with constant acceleration over dt
-                # pos = pos + v*dt + 0.5*a*dt^2
-                self.x[0:3] = self.pos + self.vel * dt + 0.5 * a_world * (dt ** 2)
-                # vel = vel + a*dt
-                self.x[3:6] = self.vel + a_world * dt
-            else:
-                # fallback: constant velocity (no accel)
-                self.x[0:3] = self.pos + self.vel * dt
-                self.x[3:6] = self.vel
+            dt = self.dt * Debug.time_scale
+            
+            # fallback: constant velocity (no accel)
+            self.x[0:3] = self.pos + self.vel * dt
+            self.x[3:6] = self.vel
 
             # Linearized F for error-state propagation (9x9) with pos <- vel coupling
             F = np.zeros((9, 9))
@@ -181,10 +155,6 @@ class KalmanStateEstimator:
 
             # Covariance propagate
             self.P = Phi @ self.P @ Phi.T + Qd
-        print("Predict got accel:", acc_to_print)
-        if a_world_to_print is not None:
-            #print("Predict using accel:", a_world_to_print)
-            pass
         
 
     def update_uwb_range(self, tag_pos_meas: np.ndarray, tag_offset: np.ndarray | None = None, use_offset: bool = True):

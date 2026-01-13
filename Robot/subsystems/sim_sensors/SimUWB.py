@@ -191,9 +191,10 @@ class SimUWB:
                 idx += 1
                 # compute wait from next timestamp if available, otherwise use self.interval
                 if idx < n:
+                    from Debug import Debug
                     next_ts = self._positions_timeline[idx]['timestamp']
                     dt = max(0.0, min(1.0, next_ts - ts))
-                    time.sleep(max(self.interval, dt))
+                    time.sleep(max(self.interval, dt) / Debug.time_scale)
                 else:
                     # EOF reached
                     break
