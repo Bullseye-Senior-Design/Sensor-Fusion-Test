@@ -141,9 +141,6 @@ class KalmanStateEstimator:
         if not self.is_initialized:
             return
 
-        # import IMU here to avoid circular import at module load time
-        from Robot.subsystems.sensors.IMU import IMU
-
         with self._lock:
             dt = self.dt
 
