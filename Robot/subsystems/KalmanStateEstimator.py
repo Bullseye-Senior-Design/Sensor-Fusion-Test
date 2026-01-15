@@ -63,9 +63,9 @@ class KalmanStateEstimator:
         self.P[6:9, 6:9] = P_att
 
         # Process noise (continuous) in error-state (9x9)
-        q_pos = 1e-2
-        q_vel = 1e-1
-        q_att = 1e-1
+        q_pos = 1e-3
+        q_vel = 1e-2
+        q_att = 1e-2
         self.Qc = block_diag(np.eye(3) * q_pos, np.eye(3) * q_vel, np.eye(3) * q_att)
 
         # Measurement noise templates
@@ -319,6 +319,8 @@ class KalmanStateEstimator:
             h = R_T[0, :] @ v_world  # scalar
 
             y = z - h  # innovation (scalar)
+
+            print(f"predicted body frame forward velocity {z:.3f} m/s, measured {h:.3f} m/s, residual {y:.3f} m/s")
 
             # Jacobian H (1x9): wrt error-state [pos, vel, att_err]
             H = np.zeros((1, 9))
