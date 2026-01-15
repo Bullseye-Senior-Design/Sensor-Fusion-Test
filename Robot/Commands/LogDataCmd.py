@@ -14,6 +14,7 @@ from typing import Optional
 from Robot.subsystems.sensors.UWB import UWB
 from Robot.subsystems.sensors.UWBTag import Position
 from Robot.subsystems.sensors.IMU import IMU
+from Robot.subsystems.sensors.Encoder import Encoder
 from Robot.subsystems.KalmanStateEstimator import KalmanStateEstimator
 
 class LogDataCmd(Command):
@@ -39,6 +40,7 @@ class LogDataCmd(Command):
             self.state_file_path = str(self.log_dir / 'state_estimator.csv')
             self.imu_file_path = str(self.log_dir / 'imu_orientation.csv')
             self.cov_file_path = str(self.log_dir / 'ekf_covariance.txt')
+            self.encoder_file_path = str(self.log_dir / 'encoder_data.csv')
 
             # open UWB positions CSV
             self._uwb_fh = open(self.uwb_file_path, 'a', newline='')
@@ -71,6 +73,14 @@ class LogDataCmd(Command):
             self._imu_writer = csv.DictWriter(self._imu_fh, fieldnames=imu_fieldnames)
             if imu_new:
                 self._imu_writer.writeheader()
+
+            # open encoder CSV
+            self._encoder_fh = open(self.encoder_file_path, 'a', newline='')
+            encoder_new = os.path.getsize(self.encoder_file_path) == 0
+            encoder_fieldnames = ['timestamp', 'count', 'velocity']
+            self._encoder_writer = csv.DictWriter(self._encoder_fh, fieldnames=encoder_fieldnames)
+            if encoder_new:
+                self._encoder_writer.writeheader()
 
             # open covariance text file handle for append
             self._cov_fh = open(self.cov_file_path, 'a')
@@ -174,6 +184,16 @@ class LogDataCmd(Command):
             self.save_orientation_to_csv(orient, imu_file)
         except Exception as e:
             print(f"IMU read error: {e}")
+
+        # 4) Encoder data
+        try:
+            encoder = Encoder()
+            count = encoder.get_count()
+            velocity = encoder.get_velocity()
+            encoder_file = _make_log_filename('encoder_data')
+            self.save_encoder_to_csv(count, velocity, encoder_file, timestamp=ts)
+        except Exception as e:
+            print(f"Encoder read error: {e}")
     
     def end(self, interrupted):
         # Close any persistent file handles opened in initialize
@@ -185,6 +205,8 @@ class LogDataCmd(Command):
             self._state_fh.close()
         if hasattr(self, '_imu_fh') and not self._imu_fh.closed:
             self._imu_fh.close()
+        if hasattr(self, '_encoder_fh') and not self._encoder_fh.closed:
+            self._encoder_fh.close()
         if hasattr(self, '_cov_fh') and not self._cov_fh.closed:
             self._cov_fh.close()
     
@@ -478,4 +500,50 @@ class LogDataCmd(Command):
             return True
         except Exception as e:
             print(f"Error saving covariance to TXT: {e}")
+            return False
+
+    def save_encoder_to_csv(self, count: int, velocity: float, filename: str, timestamp: Optional[float] = None) -> bool:
+        """Save encoder count and velocity to CSV file.
+        
+        Args:
+            count: Number of encoder counts
+            velocity: Velocity in m/s
+            filename: CSV filename
+            timestamp: Optional timestamp
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            ts = timestamp if timestamp is not None else time.time()
+
+            # Use persistent writer if available and filename matches
+            if hasattr(self, '_encoder_writer') and hasattr(self, 'encoder_file_path') and str(filename) == str(self.encoder_file_path):
+                self._encoder_writer.writerow({
+                    'timestamp': ts,
+                    'count': count,
+                    'velocity': velocity,
+                })
+                try:
+                    self._encoder_fh.flush()
+                except Exception:
+                    pass
+                return True
+
+            # Fallback: open file each time (existing behavior)
+            filename = str(filename)
+            file_exists = os.path.exists(filename)
+            with open(filename, 'a', newline='') as csvfile:
+                fieldnames = ['timestamp', 'count', 'velocity']
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                if not file_exists:
+                    writer.writeheader()
+                writer.writerow({
+                    'timestamp': ts,
+                    'count': count,
+                    'velocity': velocity,
+                })
+            return True
+        except Exception as e:
+            print(f"Error saving encoder data to CSV: {e}")
             return False
