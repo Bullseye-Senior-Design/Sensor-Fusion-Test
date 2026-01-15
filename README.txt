@@ -1,8 +1,14 @@
 This project is meant to act as a framework programing ROVs for Mate ROV 
 All programing should only have to be done in the Robot and transmission folders
 
+*you will need to manually install the library to get gpio work on the venv. 
+create with this:
+python -m venv --system-site-packages .venv
+    source .venv/bin/activate
+
 In order to auto install required python Libraries run command below in the directory
-pip install -r requirements.txt
+    pip install -r requirements.txt
+
 
 Network setup
 connect an ethernet cable, then go to settings and switch it to manual ethernet setup
@@ -22,4 +28,6 @@ Update repo from main
     git pull origin main
 
 I stole Command base from FIRST robotics. Also the gui was based on shuffleboard frc. Yar Har
+
+
 
