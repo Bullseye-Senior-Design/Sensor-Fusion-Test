@@ -4,4 +4,4 @@ class Debug:
     
     # Time scale multiplier for simulation speed (1.0 = real-time, 2.0 = 2x speed, etc.)
     # Affects KalmanStateEstimator, SimIMU, and SimUWB but not main loop
-    time_scale = 5.0
+    time_scale = 1.0
