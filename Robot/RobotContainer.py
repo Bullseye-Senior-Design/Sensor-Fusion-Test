@@ -15,7 +15,7 @@ class RobotContainer:
         self.encoder = Encoder()
         self.imu = IMU()
         self.uwb.start(uwb_tag_data=Constants.uwb_tag_data, anchors_pos=None)
-        self.encoder.start(pin=Constants.back_right_encoder_pin, active_high=True, pull_up=True, debounce_ms=1, edge='rising')
+        self.encoder.start(pin=Constants.back_right_encoder_pin, active_high=True, pull_up=True, debounce_ms=1, edge='rising', wheel_circumference=Constants.wheel_circumference, counts_per_revolution=Constants.counts_per_revolution)
                     
     def begin_data_log(self):
         LogDataCmd().schedule()

@@ -6,6 +6,8 @@ class UWBTagInfo:
 class Constants:
     # Encoder Constants
     back_right_encoder_pin = 4
+    wheel_circumference = 0.25  # meters
+    counts_per_revolution = 6  # encoder pulses per wheel rotation
     
     # For the tag offsets:
     # +x : tag is forward of the robot center
