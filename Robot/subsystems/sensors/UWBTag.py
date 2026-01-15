@@ -287,36 +287,41 @@ class UWBTag:
         time.sleep(1)
 
         def read_loop():
-            while self.is_reading:
-                anchors, position = self.get_location_data()
+            try: 
+                while self.is_reading:
+                    anchors, position = self.get_location_data()
 
-                # store anchors if provided (for diagnostics/visualization only)
-                if anchors:
-                    self.tag_info.anchors = anchors
-                    if debug:
-                        self.print_anchor_info()
+                    # store anchors if provided (for diagnostics/visualization only)
+                    if anchors:
+                        self.tag_info.anchors = anchors
+                        if debug:
+                            self.print_anchor_info()
 
-                # logger.info(f"UWBTag: Read position data {position}")
+                    # logger.info(f"UWBTag: Read position data {position}")
 
-                # Use fused POS (world) position for EKF update instead of per-anchor ranges
-                if position:
-                    with self.position_lock:
-                        self.tag_info.position = position
+                    # Use fused POS (world) position for EKF update instead of per-anchor ranges
+                    if position:
+                        with self.position_lock:
+                            self.tag_info.position = position
 
-                    # Build measurement vector and optional tag offset
-                    tag_pos_meas = np.array([position.x, position.y, position.z], dtype=float)
-                    tag_offset_vec = None if self.tag_offset is None else np.array(self.tag_offset, dtype=float)
+                        # Build measurement vector and optional tag offset
+                        tag_pos_meas = np.array([position.x, position.y, position.z], dtype=float)
+                        tag_offset_vec = None if self.tag_offset is None else np.array(self.tag_offset, dtype=float)
 
-                    # EKF update    
-                    try:
-                        self.state_estimator.update_uwb_range(tag_pos_meas, tag_offset=tag_offset_vec)
-                    except Exception as e:
-                        logger.debug(f"EKF UWB POS update skipped: {e}")
+                        # EKF update    
+                        try:
+                            self.state_estimator.update_uwb_range(tag_pos_meas, tag_offset=tag_offset_vec)
+                        except Exception as e:
+                            logger.debug(f"EKF UWB POS update skipped: {e}")
 
-                    if debug:
-                        self.print_position(position)
+                        if debug:
+                            self.print_position(position)
 
-                time.sleep(interval) # TODO check if needed
+                    time.sleep(interval) # TODO check if needed
+            except KeyboardInterrupt:
+                # Graceful exit on Ctrl-C
+                self.disconnect()
+                return
         
         self.read_thread = threading.Thread(target=read_loop, daemon=True)
         self.read_thread.start()
