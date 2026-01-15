@@ -3,4 +3,3 @@ scipy
 pyserial==3.5
 adafruit-circuitpython-bno055
 matplotlib
-Rpi.GPIO

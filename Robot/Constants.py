@@ -4,7 +4,9 @@ class UWBTagInfo:
         self.offset = offset
 
 class Constants:
-    # UWB Tag Data
+    # Encoder Constants
+    back_right_encoder_pin = 4
+    
     # For the tag offsets:
     # +x : tag is forward of the robot center
     # +y : tag is to the robot's left side
