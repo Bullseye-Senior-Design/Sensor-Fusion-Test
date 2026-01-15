@@ -321,6 +321,7 @@ class UWBTag:
             except KeyboardInterrupt:
                 # Graceful exit on Ctrl-C
                 self.disconnect()
+                return
         
         self.read_thread = threading.Thread(target=read_loop, daemon=True)
         self.read_thread.start()
