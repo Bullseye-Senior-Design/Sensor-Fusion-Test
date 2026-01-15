@@ -4,6 +4,7 @@ import time
 import threading
 from datetime import datetime
 import logging
+from Robot.subsystems.KalmanStateEstimator import KalmanStateEstimator
 
 logger = logging.getLogger("ProximitySensor")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -46,6 +47,7 @@ class Encoder:
         self._count = 0
         self._velocity = 0.0  # m/s
         self._last_update_time = time.time()
+        self.state_estimator = KalmanStateEstimator()
         
         # Wheel parameters (customize these)
         self.wheel_circumference = wheel_circumference  # meters (adjust to your wheel)
@@ -102,6 +104,7 @@ class Encoder:
                 # Calculate velocity from count changes
                 distance = (self._count / self.counts_per_revolution) * self.wheel_circumference
                 self._velocity = distance / dt
+                self.state_estimator.update_encoder_velocity(self._velocity)
                 
                 # Reset for next interval
                 self._count = 0
