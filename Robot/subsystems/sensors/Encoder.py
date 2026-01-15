@@ -23,7 +23,7 @@ class Encoder:
         return cls._instance
     
     def start(self, pin: int, active_high: bool = True, pull_up: bool = True, debounce_ms: int = 50,
-                 edge: str = 'both'):
+                 edge: str = 'both', wheel_circumference: float = 0.5, counts_per_revolution: int = 6):
         """Create a proximity sensor reader.
 
         Args:
@@ -48,8 +48,8 @@ class Encoder:
         self._last_update_time = time.time()
         
         # Wheel parameters (customize these)
-        self.wheel_circumference = 0.5  # meters (adjust to your wheel)
-        self.counts_per_revolution = 20  # encoder pulses per wheel rotation
+        self.wheel_circumference = wheel_circumference  # meters (adjust to your wheel)
+        self.counts_per_revolution = counts_per_revolution  # encoder pulses per wheel rotation
         
         self.run()
 
