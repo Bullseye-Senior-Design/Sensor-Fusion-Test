@@ -33,9 +33,10 @@ class PlotStateCmd(Command):
         self.xs = []
         self.ys = []
 
-        # UWB fused positions (plotted as dots)
-        self.uwb_xs = []        # <-- ADDED
-        self.uwb_ys = []        # <-- ADDED
+        # UWB individual tag positions (plotted as dots with gradient)
+        # Store up to 2 tags with separate color traces
+        self.max_tags = 2
+        self.uwb_tag_data = [{'xs': [], 'ys': []} for _ in range(self.max_tags)]
 
         # GUI objects
         self.root = None
@@ -89,8 +90,18 @@ class PlotStateCmd(Command):
         # green marker for the latest point
         self.last_dot, = self.ax.plot([], [], "go", markersize=8, zorder=5)
 
-        # UWB dots: red markers only (no connecting line)
-        self.uwb_dots, = self.ax.plot([], [], "ro", markersize=5, linestyle="") 
+        # UWB dots: create gradient from red to orange for multiple tags
+        self.uwb_plots = []
+        for i in range(self.max_tags):
+            # Gradient from red (#FF0000) to orange (#FF8800)
+            ratio = i / max(1, self.max_tags - 1)
+            r = 1.0
+            g = 0.0 + (0.533 * ratio)  # 0x88/0xFF = 0.533
+            b = 0.0
+            color = (r, g, b)
+            plot_line, = self.ax.plot([], [], 'o', color=color, markersize=5, linestyle="", alpha=0.7)
+            print(f"PlotStateCmd: created UWB tag plot {i} with color {color}")
+            self.uwb_plots.append(plot_line) 
 
         # top-down yaw view on right
         self.ax_top = self.figure.add_subplot(gs[0, 1])
@@ -214,23 +225,32 @@ class PlotStateCmd(Command):
                 if self.yaw_text is not None:
                     self.yaw_text.set_text("Yaw: --\N{DEGREE SIGN}")
 
-        # Update UWB dot positions from the simulated UWB subsystem
+        # Update UWB dot positions from the simulated UWB subsystem (individual tags)
         try:
-            pos = self.uwb.get_latest_position()
+            individual_positions = self.uwb.get_individual_positions()
         except Exception:
-            pos = None
+            individual_positions = None
 
-        if pos is not None:
+        if individual_positions is not None and len(individual_positions) > 0:
             try:
-                uwb_x = float(pos.x)
-                uwb_y = float(pos.y)
-                self.uwb_xs.append(uwb_x)
-                self.uwb_ys.append(uwb_y)
-                if len(self.uwb_xs) > self.max_points:
-                    self.uwb_xs = self.uwb_xs[-self.max_points :]
-                    self.uwb_ys = self.uwb_ys[-self.max_points :]
-                self.uwb_dots.set_data(self.uwb_xs, self.uwb_ys) # type: ignore
-            except Exception:
+                # Update each tag's position data
+                for tag_idx, pos in enumerate(individual_positions[:self.max_tags]):
+                    uwb_x = float(pos.x)
+                    uwb_y = float(pos.y)
+                    self.uwb_tag_data[tag_idx]['xs'].append(uwb_x)
+                    self.uwb_tag_data[tag_idx]['ys'].append(uwb_y)
+                    
+                    # Limit stored points
+                    if len(self.uwb_tag_data[tag_idx]['xs']) > self.max_points:
+                        self.uwb_tag_data[tag_idx]['xs'] = self.uwb_tag_data[tag_idx]['xs'][-self.max_points:]
+                        self.uwb_tag_data[tag_idx]['ys'] = self.uwb_tag_data[tag_idx]['ys'][-self.max_points:]
+                    
+                    # Update plot data
+                    self.uwb_plots[tag_idx].set_data(
+                        self.uwb_tag_data[tag_idx]['xs'],
+                        self.uwb_tag_data[tag_idx]['ys']
+                    )
+            except Exception as e:
                 # ignore malformed simulated readings
                 pass
 

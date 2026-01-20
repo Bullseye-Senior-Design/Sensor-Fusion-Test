@@ -13,6 +13,8 @@ import logging
 from typing import Optional, Tuple
 from Robot.subsystems.KalmanStateEstimator import KalmanStateEstimator
 from Robot.MathUtil import MathUtil
+from Debug import Debug
+
 
 logger = logging.getLogger(__name__)
 
@@ -178,8 +180,7 @@ class SimIMU():
                 sleep_for = self.interval
 
         self._idx = next_idx
-        from Debug import Debug
-        print(f"sleep_for={sleep_for:.3f}s")
+        # print(f"sleep_for={sleep_for:.3f}s")
         time.sleep(sleep_for / Debug.time_scale)
 
     # Public API methods to match real IMU

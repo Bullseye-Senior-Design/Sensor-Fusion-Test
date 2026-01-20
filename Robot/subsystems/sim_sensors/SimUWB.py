@@ -14,6 +14,8 @@ import logging
 from dataclasses import dataclass
 from typing import Optional, List, Dict, Any, Tuple, cast
 import numpy
+from Debug import Debug
+
 
 from Robot.subsystems.KalmanStateEstimator import KalmanStateEstimator
 
@@ -66,7 +68,7 @@ class SimUWB:
         self.position_lock = threading.RLock()
 
         # tag_info mirrors real UWBTag usage
-        self.tag_info = {'anchors': None, 'position': None}
+        self.tag_info = {'anchors': None, 'position': None, 'individual_positions': None}
 
         self._anchors_timeline = []  # list of (timestamp, anchors_list)
         self._positions_timeline = []  # list of dicts rows
@@ -115,6 +117,7 @@ class SimUWB:
         with self.position_lock:
             self.tag_info['anchors'] = None
             self.tag_info['position'] = None
+            self.tag_info['individual_positions'] = None
 
         logger.info('SimUWB disconnected')
 
@@ -177,6 +180,11 @@ class SimUWB:
                 # update tag_info
                 with self.position_lock:
                     self.tag_info['position'] = pos # type: ignore
+                    # Store individual positions as a list of Position objects
+                    self.tag_info['individual_positions'] = [ # type: ignore
+                        Position(x=p[0], y=p[1], z=p[2], quality=p[3], timestamp=ts)
+                        for p in pos_samples
+                    ] if pos_samples else None 
 
                 # if we have a valid (possibly averaged) position, feed the EKF like a real device
                 if pos is not None:
@@ -191,7 +199,6 @@ class SimUWB:
                 idx += 1
                 # compute wait from next timestamp if available, otherwise use self.interval
                 if idx < n:
-                    from Debug import Debug
                     next_ts = self._positions_timeline[idx]['timestamp']
                     dt = max(0.0, min(1.0, next_ts - ts))
                     time.sleep(max(self.interval, dt) / Debug.time_scale)
@@ -203,6 +210,7 @@ class SimUWB:
             with self.position_lock:
                 self.tag_info['anchors'] = None
                 self.tag_info['position'] = None
+                self.tag_info['individual_positions'] = None
 
             self.is_reading = False
             logger.info('SimUWB playback finished (EOF reached)')
@@ -228,5 +236,7 @@ class SimUWB:
                 return None
             return [a.copy() for a in anchors]
 
-
-__all__ = ['SimUWB', 'Position']
+    def get_individual_positions(self) -> Optional[List[Position]]:
+        """Get the list of individual tag positions (before averaging)."""
+        with self.position_lock:
+            return self.tag_info.get('individual_positions')
