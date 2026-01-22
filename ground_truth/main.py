@@ -4,7 +4,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 
 # Define ground truth waypoints (x, y positions)
-ground_truth = [((0, 0), (7.5, 0)), ((7.5, 0), (15, 0)), ((15, 0), (22.5, 0)), ((22.5, 0), (30, 0))]
+ground_truth = [((2.667, 0.914), (4.191, 0.914)), ((4.191, 0.914), (4.191, 4.595)), ((4.191, 4.595), (2.667, 4.595)), ((2.667, 4.595), (2.667, 0.914))]
 
 def load_csv_files(data_dir):
     """Load state estimator and UWB position CSV files."""
@@ -74,46 +74,47 @@ def analyze_uwb_positions(uwb_positions_df, ground_truth):
     print("\n" + "="*70)
     print("UWB POSITIONS ANALYSIS")
     print("="*70)
-    
+
     # Extract UWB tag 1 and tag 2 positions
     uwb_data = uwb_positions_df[['x1', 'y1', 'x2', 'y2']].copy()
-    
-    # Average the two UWB positions when both are available
+
+    # Collect tag-specific samples for plotting
+    tag1_positions = uwb_data[['x1', 'y1']].dropna(subset=['x1', 'y1']).to_numpy()
+    tag2_positions = uwb_data[['x2', 'y2']].dropna(subset=['x2', 'y2']).to_numpy()
+
+    # Average the two UWB positions when both are available (used for analysis)
     positions = []
-    for idx, row in uwb_data.iterrows():
+    for _, row in uwb_data.iterrows():
         x1, y1, x2, y2 = row['x1'], row['y1'], row['x2'], row['y2']
-        
-        # Count how many positions are valid (not NaN)
+
         valid_positions = []
         if pd.notna(x1) and pd.notna(y1):
             valid_positions.append((x1, y1))
         if pd.notna(x2) and pd.notna(y2):
             valid_positions.append((x2, y2))
-        
-        # Average if we have positions
+
         if len(valid_positions) == 2:
             avg_x = (valid_positions[0][0] + valid_positions[1][0]) / 2
             avg_y = (valid_positions[0][1] + valid_positions[1][1]) / 2
             positions.append([avg_x, avg_y])
         elif len(valid_positions) == 1:
             positions.append(list(valid_positions[0]))
-    
+
     if len(positions) == 0:
         print("No valid UWB position data available!")
-        return None, None
-    
+        return None, None, tag1_positions, tag2_positions
+
     positions = np.array(positions)
-    print(f"Total valid UWB samples: {len(positions)}")
-    
+    print(f"Total valid UWB samples (averaged for analysis): {len(positions)}")
+
     distances = []
     for segment in ground_truth:
         x1, y1 = segment[0]
         x2, y2 = segment[1]
-        
-        # Calculate distance to closest point on line segment
+
         segment_distances = [distance_point_to_line_segment(pos[0], pos[1], x1, y1, x2, y2) for pos in positions]
         distances.extend(segment_distances)
-    
+
     if len(distances) > 0:
         distances = np.array(distances)
         print(f"Mean distance from ground truth: {np.mean(distances):.4f} meters")
@@ -121,10 +122,10 @@ def analyze_uwb_positions(uwb_positions_df, ground_truth):
         print(f"Std deviation: {np.std(distances):.4f} meters")
         print(f"Min distance: {np.min(distances):.4f} meters")
         print(f"Max distance: {np.max(distances):.4f} meters")
-        return distances, positions
-    else:
-        print("Could not calculate distances!")
-        return None, None
+        return distances, positions, tag1_positions, tag2_positions
+
+    print("Could not calculate distances!")
+    return None, None, tag1_positions, tag2_positions
 
 def compare_systems(state_distances, uwb_distances):
     """Compare state estimator and UWB system performance."""
@@ -145,32 +146,38 @@ def compare_systems(state_distances, uwb_distances):
     else:
         print("→ UWB Positions performs BETTER")
 
-def plot_comparison(state_distances, state_positions, uwb_distances, uwb_positions):
+def plot_comparison(state_distances, state_positions, uwb_distances, uwb_positions, uwb_tag1_positions=None, uwb_tag2_positions=None):
     """Create visualization of the comparison."""
     fig, ax = plt.subplots(figsize=(12, 8))
-    
+
     # Plot ground truth lines
     for i, segment in enumerate(ground_truth):
         x1, y1 = segment[0]
         x2, y2 = segment[1]
         ax.plot([x1, x2], [y1, y2], 'k-', linewidth=3, label='Ground Truth' if i == 0 else '')
         ax.plot([x1, x2], [y1, y2], 'ko', markersize=8)
-    
+
     # Plot State Estimator positions
     if state_positions is not None:
         ax.scatter(state_positions[:, 0], state_positions[:, 1], c='blue', alpha=0.6, s=30, label='State Estimator')
-    
-    # Plot UWB positions
+
+    # Plot UWB tag-specific positions
+    if uwb_tag1_positions is not None and len(uwb_tag1_positions) > 0:
+        ax.scatter(uwb_tag1_positions[:, 0], uwb_tag1_positions[:, 1], c='orange', alpha=0.6, s=30, label='UWB Tag 1')
+    if uwb_tag2_positions is not None and len(uwb_tag2_positions) > 0:
+        ax.scatter(uwb_tag2_positions[:, 0], uwb_tag2_positions[:, 1], c='purple', alpha=0.6, s=30, label='UWB Tag 2')
+
+    # Plot averaged UWB positions used for analysis
     if uwb_positions is not None and len(uwb_positions) > 0:
-        ax.scatter(uwb_positions[:, 0], uwb_positions[:, 1], c='green', alpha=0.6, s=30, label='UWB Positions')
-    
+        ax.scatter(uwb_positions[:, 0], uwb_positions[:, 1], c='green', alpha=0.6, s=30, marker='x', label='UWB Avg (analysis)')
+
     ax.set_xlabel('X Position (meters)', fontsize=12)
     ax.set_ylabel('Y Position (meters)', fontsize=12)
     ax.set_title('Position Estimates vs Ground Truth', fontsize=14, fontweight='bold')
     ax.legend(fontsize=11)
     ax.grid(True, alpha=0.3)
     ax.axis('equal')
-    
+
     plt.tight_layout()
     plt.savefig('position_comparison.png', dpi=100)
     print("\nPlot saved as 'position_comparison.png'")
@@ -185,14 +192,14 @@ def main():
     
     # Analyze both systems
     state_distances, state_positions = analyze_state_estimator(state_estimator_df, ground_truth)
-    uwb_distances, uwb_positions = analyze_uwb_positions(uwb_positions_df, ground_truth)
+    uwb_distances, uwb_positions, uwb_tag1_positions, uwb_tag2_positions = analyze_uwb_positions(uwb_positions_df, ground_truth)
     
     # Compare systems
     compare_systems(state_distances, uwb_distances)
     
     # Create visualization
     try:
-        plot_comparison(state_distances, state_positions, uwb_distances, uwb_positions)
+        plot_comparison(state_distances, state_positions, uwb_distances, uwb_positions, uwb_tag1_positions, uwb_tag2_positions)
     except Exception as e:
         print(f"\nNote: Could not create plot: {e}")
 
