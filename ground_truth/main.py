@@ -4,11 +4,13 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 
 # Define ground truth waypoints (x, y positions)
-ground_truth = [((2.667, 0.914), (4.191, 0.914)), ((4.191, 0.914), (4.191, 4.595)), ((4.191, 4.595), (2.667, 4.595)), ((2.667, 4.595), (2.667, 0.914))]
+table_size = [((2.667, 0.914), (4.191, 0.914)), ((4.191, 0.914), (4.191, 4.595)), ((4.191, 4.595), (2.667, 4.595)), ((2.667, 4.595), (2.667, 0.914))]
 
 def load_csv_files(data_dir):
     """Load state estimator and UWB position CSV files."""
     state_estimator_path = Path(data_dir) / 'state_estimator.csv'
+    if not state_estimator_path.exists():
+        state_estimator_path = Path(data_dir) / 'kalman.csv'
     uwb_positions_path = Path(data_dir) / 'uwb_positions.csv'
     
     print("Loading data files...")
@@ -16,6 +18,37 @@ def load_csv_files(data_dir):
     uwb_positions_df = pd.read_csv(uwb_positions_path)
     
     return state_estimator_df, uwb_positions_df
+
+def adjust_ground_truth_by_robot_size(table_waypoints, robot_size):
+    """Inset each segment by half the robot size both perpendicular to and along the segment."""
+    adjusted_waypoints = []
+    half_size = robot_size / 2
+
+    for segment in table_waypoints:
+        (x1, y1), (x2, y2) = segment
+
+        dx = x2 - x1
+        dy = y2 - y1
+        length = np.sqrt(dx**2 + dy**2)
+
+        if length > 0:
+            nx = dx / length  # direction along the segment
+            ny = dy / length
+        else:
+            nx = ny = 0
+
+        px = -ny  # unit normal (perpendicular)
+        py = nx
+
+        # Pull the entire segment inward and shorten it to avoid the original corner points
+        new_x1 = x1 + px * half_size + nx * half_size
+        new_y1 = y1 + py * half_size + ny * half_size
+        new_x2 = x2 + px * half_size - nx * half_size
+        new_y2 = y2 + py * half_size - ny * half_size
+
+        adjusted_waypoints.append(((new_x1, new_y1), (new_x2, new_y2)))
+
+    return adjusted_waypoints
 
 def distance_point_to_point(x1, y1, x2, y2):
     """Calculate Euclidean distance between two points."""
@@ -146,7 +179,7 @@ def compare_systems(state_distances, uwb_distances):
     else:
         print("→ UWB Positions performs BETTER")
 
-def plot_comparison(state_distances, state_positions, uwb_distances, uwb_positions, uwb_tag1_positions=None, uwb_tag2_positions=None):
+def plot_comparison(state_distances, state_positions, uwb_distances, uwb_positions, ground_truth, uwb_tag1_positions=None, uwb_tag2_positions=None):
     """Create visualization of the comparison."""
     fig, ax = plt.subplots(figsize=(12, 8))
 
@@ -169,7 +202,7 @@ def plot_comparison(state_distances, state_positions, uwb_distances, uwb_positio
 
     # Plot averaged UWB positions used for analysis
     if uwb_positions is not None and len(uwb_positions) > 0:
-        ax.scatter(uwb_positions[:, 0], uwb_positions[:, 1], c='green', alpha=0.6, s=30, marker='x', label='UWB Avg (analysis)')
+        ax.scatter(uwb_positions[:, 0], uwb_positions[:, 1], c='green', alpha=0.6, s=30, marker='x', label='UWB Avg')
 
     ax.set_xlabel('X Position (meters)', fontsize=12)
     ax.set_ylabel('Y Position (meters)', fontsize=12)
@@ -190,6 +223,9 @@ def main():
     # Load data
     state_estimator_df, uwb_positions_df = load_csv_files(data_dir)
     
+    robot_size = 0.2477 
+    ground_truth = adjust_ground_truth_by_robot_size(table_size, robot_size)
+    
     # Analyze both systems
     state_distances, state_positions = analyze_state_estimator(state_estimator_df, ground_truth)
     uwb_distances, uwb_positions, uwb_tag1_positions, uwb_tag2_positions = analyze_uwb_positions(uwb_positions_df, ground_truth)
@@ -199,7 +235,7 @@ def main():
     
     # Create visualization
     try:
-        plot_comparison(state_distances, state_positions, uwb_distances, uwb_positions, uwb_tag1_positions, uwb_tag2_positions)
+        plot_comparison(state_distances, state_positions, uwb_distances, uwb_positions, ground_truth, uwb_tag1_positions, uwb_tag2_positions)
     except Exception as e:
         print(f"\nNote: Could not create plot: {e}")
 
