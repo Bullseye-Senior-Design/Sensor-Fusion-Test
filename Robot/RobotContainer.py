@@ -8,6 +8,7 @@ from Robot.Commands.LogDataCmd import LogDataCmd
 from Robot.Commands.PlotStateCmd import PlotStateCmd
 from Robot.Commands.AlignIMUToWorldCmd import AlignIMUToWorldCmd
 from Robot.Commands.ZeroIMUCmd import ZeroIMUCmd
+from Robot.Commands.MiniBullseyeControlCmd import MiniBullseyeControlCmd
 
 class RobotContainer:
     def __init__(self):
@@ -21,4 +22,8 @@ class RobotContainer:
         LogDataCmd().schedule()
         # PlotStateCmd().schedule()
         ZeroIMUCmd().schedule()
+        
         # AlignIMUToWorldCmd(tau=0.5, duration=30.0).schedule()
+        
+    def begin_mini_bullseye_control(self):
+        MiniBullseyeControlCmd().schedule()
