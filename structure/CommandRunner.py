@@ -95,7 +95,7 @@ class CommandRunner:
                     break
             
             if not_conflicting:
-                default_command.initalize()
+                default_command.initialize()
                 self.commands.append(default_command)
 
             
@@ -116,7 +116,7 @@ class CommandRunner:
                 command.end(True)
                 self.commands.remove(cmd)
         
-        command.initalize()
+        command.initialize()
         self.commands.append(command)
     
     # adds a default command to the list of default commands

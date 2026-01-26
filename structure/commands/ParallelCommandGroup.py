@@ -10,7 +10,7 @@ class ParallelCommandGroup(Command):
             self.commands.append(command)
             super().add_cmd_requirements(command)
     
-    def initalize(self):        
+    def initialize(self):        
         # initalize the all commands
         for command in self.commands:
             command.initalize()

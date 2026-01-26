@@ -8,10 +8,24 @@ import busio
 import adafruit_bno055
 import math
 import numpy as np
+from collections import deque
 import time
 from typing import Optional, Tuple
-from Robot.subsystems.KalmanStateEstimator import KalmanStateEstimator 
+from Robot.subsystems.KalmanStateEstimator import KalmanStateEstimator
+from Robot.MathUtil import MathUtil
 
+# implement a simple low-pass IIR filter for smoothing IMU data
+# cutoff frequency fc_hz, sampling frequency fs_hz
+class _LowPassIIR:
+    def __init__(self, fc_hz: float, fs_hz: float, y0: float = 0.0):
+        dt = 1.0 / fs_hz
+        RC = 1.0 / (2.0 * math.pi * fc_hz)
+        self.alpha = dt / (RC + dt)
+        self.y = float(y0)
+    def update(self, x: float) -> float:
+        # differential equation implementation: (y[n] = y[n−1] + α (x[n] − y[n−1]))
+        self.y += self.alpha * (x - self.y)
+        return self.y
 
 class IMU():
     _instance = None
@@ -32,13 +46,28 @@ class IMU():
         self.acceleration = (0.0, 0.0, 0.0)
         self.gyro = (0.0, 0.0, 0.0)
         self.magnetic = (0.0, 0.0, 0.0)
-        self.quat = (0.0, 0.0, 0.0, 0.0)
-
-        # Reference magnetometer vector in world frame (can be adjusted or updated later)
-        self.mag_ref_world = np.array([0.0, 0.0, -1.0])
+        self.quat = (0.0, 0.0, 0.0, 1.0)
 
         self.interval = 0.01  # update interval in seconds
         self.mag_interval = self.interval * 5
+        # Filters (tune fc as needed)
+        fs_hz = 1.0 / self.interval # interval in herts
+        self._accel_lpf = [_LowPassIIR(fc_hz=8.0,  fs_hz=fs_hz) for _ in range(3)]
+        # Outlier rejection/clamping for accelerometer (m/s^2)
+        # If a single-sample delta from the filter state is larger than
+        # _accel_outlier_threshold it will be clamped to that threshold
+        # before being fed to the low-pass filter. Also, samples with
+        # magnitude > _accel_max_magnitude or NaN/Inf are ignored/clamped.
+        self._accel_outlier_threshold = 5.0
+        self._accel_max_magnitude = 50.0
+        # Simple median-window filter parameters (per-axis)
+        # We'll use a small sliding window median to suppress spikes.
+        self._accel_median_window_size = 3
+        # per-axis ring buffers for median filter
+        self._accel_windows = [deque(maxlen=self._accel_median_window_size) for _ in range(3)]
+        # debug flag to print when a raw value differs strongly from the median
+        self._accel_median_debug = False
+        
         # timestamp of last magnetic sample
         self._last_mag_time = 0.0
 
@@ -46,14 +75,21 @@ class IMU():
         self._lock = threading.RLock()
         self.state_estimator = KalmanStateEstimator()
 
-        # Start initial calibration in background (non-blocking) and then start continuous update
-        # Calibration will write computed biases into the KalmanStateEstimator when done.
-        t = threading.Thread(target=self.initial_calibration, kwargs={"duration": 1.0, "sample_delay": 0.01}, daemon=True)
-        t.start()
+        # yaw offset to apply to sensor attitude (radians). This rotates the
+        # sensor-reported orientation into the chosen world frame.
+        self._yaw_offset_rad = 0.0
+        # cached estimator-order quaternion (aligned) for quick access
+        self._quat_est_cached = (0.0, 0.0, 0.0, 1.0)
+        self._is_offset_set = False
 
-        # Start magnetometer reference calibration in background (non-blocking)
-        # runs as a daemon thread and returns immediately
-        self.calibrate_mag_ref(duration=20.0, sample_delay=0.05, run_async=True)
+        self.sensor.offsets_accelerometer = (-26, 0, -50)
+        self.sensor.offsets_gyroscope = (-1, -4, -1)
+        self.sensor.offsets_magnetometer = (-839, -601, -413)
+        
+        print("IMU offset values: {}, {}, {}".format(
+            self.sensor.offsets_accelerometer,
+            self.sensor.offsets_gyroscope,
+            self.sensor.offsets_magnetometer))
 
         # Print any library-provided calibration info (if available)
         self.print_library_calibration()
@@ -78,42 +114,71 @@ class IMU():
         with self._lock:
             return tuple(self.quat)
     
-    def get_euler(self) -> tuple:
+    def set_yaw_offset(self, yaw_offset_deg: float) -> None:
+        """Set a yaw offset (degrees). The offset is stored and applied to
+        the quaternion sent to the estimator and available via
+        `get_aligned_quat()`.
+        """
+        yaw_deg = float(yaw_offset_deg)
         with self._lock:
-            q = tuple(self.quat)
+            self._yaw_offset_rad = math.radians(yaw_deg)
+            self._is_offset_set = True
 
-        # ensure we have a valid quaternion (w, x, y, z)
-        if not q or len(q) != 4:
+    def get_aligned_quat(self) -> tuple:
+        """Return the last quaternion adjusted by the configured yaw offset.
+
+        Returned ordering is estimator ordering [qx,qy,qz,qw]. If no quaternion
+        has been read yet this returns a unit quaternion.
+        """
+        with self._lock:
+            raw = self.quat
+            if not raw or len(raw) != 4:
+                return (0.0, 0.0, 0.0, 1.0)
+            try:
+                q_sensor = np.asarray(raw, dtype=float)
+                q_est = MathUtil.quat_sensor_to_estimator(q_sensor)
+            except Exception:
+                q_est = np.array([0.0, 0.0, 0.0, 1.0], dtype=float)
+            # apply yaw offset if present
+            if self._is_offset_set and abs(self._yaw_offset_rad) > 1e-12:
+                q_yaw = MathUtil.euler_to_quat(np.array([0.0, 0.0, self._yaw_offset_rad]))
+                q_est = MathUtil.quat_mul(q_yaw, q_est)
+                q_est = MathUtil.quat_normalize(q_est)
+            return tuple(q_est)
+        
+    
+    def get_euler(self) -> tuple:
+        """Return the current (yaw, roll, pitch) in degrees, adjusted by yaw offset.
+        """
+        # Use MathUtil helpers: convert sensor quaternion ordering to estimator
+        # ordering, apply yaw offset if set, then convert to Euler using
+        # MathUtil.quat_to_euler which returns (roll, pitch, yaw) in radians.
+        with self._lock:
+            raw = tuple(self.quat)
+            yaw_off = float(self._yaw_offset_rad)
+
+        # validate
+        if not raw or len(raw) != 4:
             return (0.0, 0.0, 0.0)
 
-        # ensure quaternion components are numeric (replace None with 0.0)
-        def _safe(val):
-            return 0.0 if val is None else float(val)
+        q_sensor = np.asarray(raw, dtype=float)
+        q_est = MathUtil.quat_sensor_to_estimator(q_sensor)
 
-        # assume quaternion is (w, x, y, z) as returned by Adafruit BNO055
-        w, x, y, z = (_safe(v) for v in q)
+        # apply yaw offset if configured
+        if self._is_offset_set and abs(yaw_off) > 1e-12:
+            q_yaw = MathUtil.euler_to_quat(np.array([0.0, 0.0, yaw_off]))
+            q_est = MathUtil.quat_mul(q_yaw, q_est)
+            q_est = MathUtil.quat_normalize(q_est)
 
-        # roll (x-axis rotation)
-        sinr_cosp = 2.0 * (w * x + y * z)
-        cosr_cosp = 1.0 - 2.0 * (x * x + y * y)
-        roll = math.atan2(sinr_cosp, cosr_cosp)
+        # MathUtil.quat_to_euler returns [roll, pitch, yaw] in radians
+        rpy = MathUtil.quat_to_euler(q_est)
 
-        # pitch (y-axis rotation)
-        sinp = 2.0 * (w * y - z * x)
-        if sinp >= 1.0:
-            pitch = math.pi / 2
-        elif sinp <= -1.0:
-            pitch = -math.pi / 2
-        else:
-            pitch = math.asin(sinp)
+        roll = float(rpy[0])
+        pitch = float(rpy[1])
+        yaw = float(rpy[2])
 
-        # yaw / heading (z-axis rotation)
-        siny_cosp = 2.0 * (w * z + x * y)
-        cosy_cosp = 1.0 - 2.0 * (y * y + z * z)
-        yaw = math.atan2(siny_cosp, cosy_cosp)
-
-        # return in (heading, roll, pitch) degrees to match sensor.euler ordering
         deg = math.degrees
+        # return in (heading, roll, pitch) degrees to match previous API
         return (deg(yaw), deg(roll), deg(pitch))
 
     def mag_interval_elapsed(self) -> bool:
@@ -132,108 +197,6 @@ class IMU():
         threading.Thread(target=_update_loop, daemon=True).start()
         
 
-    def _collect_samples_for_duration(self, read_fn, duration: float, sample_delay: float = 0.01):
-        """Collect samples from read_fn for `duration` seconds and return a numpy array (N x 3)."""
-        samples = []
-        end_t = time.time() + duration
-        while time.time() < end_t:
-            try:
-                v = read_fn()
-            except Exception:
-                v = None
-            if v is not None and all(x is not None for x in v):
-                try:
-                    arr = np.asarray(v, dtype=float)
-                    if arr.shape[0] >= 3:
-                        samples.append(arr[0:3])
-                except Exception:
-                    pass
-            time.sleep(sample_delay)
-        if samples:
-            return np.vstack(samples)
-        else:
-            return np.empty((0, 3), dtype=float)
-
-    def _quat_to_rotmat_sensor(self, q_sensor: Tuple[float, float, float, float]) -> np.ndarray:
-        """
-        Convert a quaternion in sensor order (w, x, y, z) to a 3x3 rotation matrix R (body -> world).
-        Returns identity if input is invalid.
-        """
-        if q_sensor is None or len(q_sensor) != 4:
-            return np.eye(3)
-        w, x, y, z = (0.0 if v is None else float(v) for v in q_sensor)
-        R = np.empty((3, 3))
-        R[0, 0] = 1 - 2 * (y * y + z * z)
-        R[0, 1] = 2 * (x * y - z * w)
-        R[0, 2] = 2 * (x * z + y * w)
-        R[1, 0] = 2 * (x * y + z * w)
-        R[1, 1] = 1 - 2 * (x * x + z * z)
-        R[1, 2] = 2 * (y * z - x * w)
-        R[2, 0] = 2 * (x * z - y * w)
-        R[2, 1] = 2 * (y * z + x * w)
-        R[2, 2] = 1 - 2 * (x * x + y * y)
-        return R
-
-    def calibrate_mag_ref(self, duration: float = 20.0, sample_delay: float = 0.05, normalize: bool = True, run_async: bool = True):
-        """
-        Calibrate `self.mag_ref_world` by collecting magnetometer samples and transforming them
-        into the world frame using the sensor quaternion. Average the transformed vectors.
-
-        - duration: seconds to collect samples (rotate device during this time to sample orientations)
-        - sample_delay: seconds between samples
-        - normalize: if True, store unit vector (direction only). The KF uses direction-only comparison.
-        - async: if True, run calibration in a daemon thread and return the Thread object.
-
-        Returns the Thread if async=True, otherwise None.
-        """
-        def _calibrate():
-            print(f"IMU: starting mag_ref calibration for {duration:.1f}s - rotate the IMU on all axes...")
-            samples = []
-            end_t = time.time() + duration
-            while time.time() < end_t:
-                try:
-                    mag = self.sensor.magnetic  # body-frame magnetometer reading
-                    quat = self.sensor.quaternion  # sensor quaternion (w,x,y,z)
-                except Exception:
-                    mag = None
-                    quat = None
-
-                if mag is not None and all(v is not None for v in mag) and quat is not None and len(quat) == 4:
-                    try:
-                        mag_vec = np.asarray(mag, dtype=float)
-                        R = self._quat_to_rotmat_sensor(quat)  # type: ignore # body -> world
-                        mag_world = R @ mag_vec
-                        samples.append(mag_world)
-                    except Exception:
-                        pass
-
-                time.sleep(sample_delay)
-
-            if not samples:
-                print("IMU: mag_ref calibration collected no valid samples.")
-                return
-
-            arr = np.vstack(samples)
-            mean_world = np.mean(arr, axis=0)
-
-            if normalize:
-                nrm = np.linalg.norm(mean_world)
-                if nrm > 0:
-                    mean_world = mean_world / nrm
-
-            # thread-safe write
-            with self._lock:
-                self.mag_ref_world = mean_world.astype(float)
-            print("IMU: mag_ref_world calibrated ->", self.mag_ref_world)
-
-        if run_async:
-            thread = threading.Thread(target=_calibrate, daemon=True)
-            thread.start()
-            return thread
-        else:
-            _calibrate()
-            return None
-
     def print_library_calibration(self) -> None:
         """Read and print calibration information from the underlying sensor library (if present).
 
@@ -247,7 +210,7 @@ class IMU():
                 sys, gyro, accel, mag = self.sensor.calibration_status
                 print(f"Calibration Status: System={sys}, Gyro={gyro}, Accel={accel}, Mag={mag}")
                 time.sleep(0.1)
-                         
+            
             accel_off = self.sensor.offsets_accelerometer
             gyro_off = self.sensor.offsets_gyroscope
             mag_off = self.sensor.offsets_magnetometer
@@ -259,58 +222,52 @@ class IMU():
         
         threading.Thread(target=begin, daemon=True).start()
 
-    def initial_calibration(self, duration: float, sample_delay: float):
+    def _apply_median_window(self, raw_vals: list) -> list:
+        """Apply per-axis sliding-window median filter to raw_vals.
+
+        This updates the per-axis ring buffers stored in ``self._accel_windows``.
+        Behavior matches the previous inline implementation:
+          - append the new sample to the axis window
+          - while the window isn't full, return the raw sample
+          - once full, replace the sample with the median of the window
+          - optionally print a debug message when the raw value differs
+            from the median by more than 1e-2
+
+        Returns a new list with possibly-replaced values.
         """
-        Run a short calibration capturing gyro and accel while stationary (non-blocking).
+        out = [0.0, 0.0, 0.0]
+        for i in range(3):
+            val = float(raw_vals[i])
+            win = self._accel_windows[i]
+            win.append(val)
+            # if window not yet full, use the raw sample
+            if len(win) < self._accel_median_window_size:
+                out[i] = val
+                continue
+            # compute median from window and use it as the filtered sample
+            med = float(np.median(np.asarray(list(win), dtype=float)))
+            if self._accel_median_debug and abs(val - med) > 1e-2:
+                print(f"IMU median replace axis={i} raw={val:.4f} med={med:.4f}")
+            out[i] = med
+        return out
 
-        - duration: total seconds to sample (default 1.0)
-        - sample_delay: seconds between sensor reads
+    def _rotate_vector_by_yaw(self, vec: Tuple[float, float, float], yaw_rad: float) -> Tuple[float, float, float]:
+        """Rotate a 3-vector by a yaw angle (radians) about Z axis.
 
-        Results:
-          - writes gyro bias into KalmanStateEstimator.bg (x[13:16])
-          - writes accel bias (simple magnitude correction) into KalmanStateEstimator.ba (x[10:13])
-
-        This function runs in a daemon thread (started from _start()) so it won't block the main loop.
+        Uses MathUtil to build a yaw quaternion and converts to a rotation
+        matrix. Expects and returns tuples in estimator/sensor axis order as
+        appropriate (consistent with how vectors are used elsewhere).
         """
         try:
-            print(f"IMU: starting initial calibration for {duration:.2f}s (stationary) in background...")
-            # Collect gyro and accel samples directly from sensor
-            gyro_samples = self._collect_samples_for_duration(lambda: self.sensor.gyro, duration, sample_delay)
-            accel_samples = self._collect_samples_for_duration(lambda: self.sensor.acceleration, duration, sample_delay)
+            v = np.asarray(vec, dtype=float)
+            q_yaw = MathUtil.euler_to_quat(np.array([0.0, 0.0, float(yaw_rad)]))
+            R = MathUtil.quat_to_rotmat(q_yaw)
+            res = R.dot(v)
+            return (float(res[0]), float(res[1]), float(res[2]))
+        except Exception:
+            # if anything goes wrong, return original vector
+            return (float(vec[0]), float(vec[1]), float(vec[2]))
 
-            gyro_bias = np.zeros(3, dtype=float)
-            accel_bias = np.zeros(3, dtype=float)
-
-            if gyro_samples.size:
-                gyro_bias = np.mean(gyro_samples, axis=0)
-                print("IMU: computed gyro bias (will set in estimator) =", gyro_bias)
-            else:
-                print("IMU: no gyro samples collected during calibration; gyro bias left zeros")
-
-            if accel_samples.size:
-                mean_acc = np.mean(accel_samples, axis=0)
-                g_val = 9.80665
-                mean_norm = np.linalg.norm(mean_acc)
-                if mean_norm > 1e-6:
-                    # simple magnitude correction: compute bias so corrected mean has magnitude g
-                    scale = g_val / mean_norm
-                    corrected = mean_acc * scale
-                    accel_bias = mean_acc - corrected
-                    print("IMU: computed accel bias (will set in estimator) =", accel_bias, " mean_acc=", mean_acc)
-                else:
-                    print("IMU: accel mean magnitude too small; accel bias left zeros")
-            else:
-                print("IMU: no accel samples collected during calibration; accel bias left zeros")
-
-            # Write biases into KalmanStateEstimator using its public setter (thread-safe)
-            try:
-                # prefer using the estimator's API rather than touching internal arrays
-                self.state_estimator.set_biases(accel_bias, gyro_bias)
-                print("IMU: biases written to KalmanStateEstimator (ba, bg).")
-            except Exception as e:
-                print("IMU: failed to write biases to estimator:", e)
-        except Exception as e:
-            print("IMU: calibration exception:", e)
 
     def update(self):
         # continuous update loop; keep reads outside lock and assign under lock
@@ -340,34 +297,92 @@ class IMU():
         if all(v is not None for v in quat_val):
             quat = quat_val # type: ignore
 
-        # NOTE: biases are stored in the KalmanStateEstimator (x[10:13] = ba, x[13:16] = bg).
-        # The estimator's predict() method subtracts those biases, so we pass raw measurements here.
-        accel_arr: Optional[np.ndarray] = None
-        gyro_arr: Optional[np.ndarray] = None
+        # Apply low-pass filter (if samples present)
         if accel is not None:
-            accel_arr = np.asarray(accel, dtype=float)
-        if gyro is not None:
-            gyro_arr = np.asarray(gyro, dtype=float)
+            # Protect against NaN/Inf, huge spikes, and clamp single-sample
+            # deltas relative to the current LPF state so large outliers
+            # don't pass through the filter in one step.
+            raw_vals = [float(accel[i]) for i in range(3)]
+            filtered = [0.0, 0.0, 0.0]
+            # Simple sliding-window median filter (extracted to helper)
+            raw_vals = self._apply_median_window(raw_vals)
+            # quick magnitude check
+            try:
+                mag = math.sqrt(raw_vals[0]*raw_vals[0] + raw_vals[1]*raw_vals[1] + raw_vals[2]*raw_vals[2])
+            except Exception:
+                mag = float('inf')
 
-        if accel_arr is not None and gyro_arr is not None:
-            self.state_estimator.predict(accel_meas=accel_arr, gyro_meas=gyro_arr)
-        if magnetic is not None:
-            mag_arr = np.asarray(magnetic, dtype=float)
-            # use instance mag_ref_world (set during _start, can be changed later)
-            self.state_estimator.update_mag(mag_arr, self.mag_ref_world)
+            for i in range(3):
+                lpf = self._accel_lpf[i]
+                prev = lpf.y
+                val = raw_vals[i]
+
+                # NaN/Inf protection
+                if not math.isfinite(val):
+                    # replace with previous filtered value
+                    val = prev
+
+                # If the whole vector is absurdly large, clamp to previous
+                if mag > float(self._accel_max_magnitude):
+                    val = prev
+                else:
+                    # clamp single-axis delta to avoid single-sample spikes
+                    delta = val - prev
+                    max_delta = float(self._accel_outlier_threshold)
+                    if abs(delta) > max_delta:
+                        val = prev + math.copysign(max_delta, delta)
+
+                # update LPF with the protected/clamped value
+                filtered[i] = lpf.update(val)
+
+            accel = (filtered[0], filtered[1], filtered[2])
+            # apply yaw offset to accelerometer if configured
+            if self._is_offset_set and abs(self._yaw_offset_rad) > 1e-12:
+                with self._lock:
+                    yaw = float(self._yaw_offset_rad)
+                accel = self._rotate_vector_by_yaw(accel, yaw)
+
+        if quat is not None:
+            quat_arr = np.asarray(quat, dtype=float)
+            # convert sensor quaternion (w, x, y, z) to estimator order [qx,qy,qz,qw]
+            q_est = MathUtil.quat_sensor_to_estimator(quat_arr)
+            # apply configured yaw offset before sending to estimator
+            with self._lock:
+                yaw_off = float(self._yaw_offset_rad)
+            if self._is_offset_set:
+                q_yaw = MathUtil.euler_to_quat(np.array([0.0, 0.0, yaw_off]))
+                q_est = MathUtil.quat_mul(q_yaw, q_est)
+                q_est = MathUtil.quat_normalize(q_est)
+                # update attitude in KalmanStateEstimator
+                self.state_estimator.update_imu_attitude(q_meas=q_est)
 
         with self._lock:
             if accel is not None:
                 self.acceleration = tuple(accel)
             if gyro is not None:
+                # apply yaw offset to gyroscope vector if configured
+                if self._is_offset_set and abs(self._yaw_offset_rad) > 1e-12:
+                    gyro = self._rotate_vector_by_yaw(gyro, float(self._yaw_offset_rad))
                 self.gyro = tuple(gyro)
 
             if magnetic is not None:
+                # apply yaw offset to magnetometer vector if configured
+                if self._is_offset_set and abs(self._yaw_offset_rad) > 1e-12:
+                    magnetic = self._rotate_vector_by_yaw(magnetic, float(self._yaw_offset_rad))
                 self.magnetic = tuple(magnetic)
                 # update last-mag timestamp only when we actually stored a magnetic sample
                 self._last_mag_time = time.time()
             if quat is not None:
                 self.quat = tuple(quat)
+                # also keep a cached estimator-order aligned quaternion for quick access
+                q_sensor = np.asarray(quat, dtype=float)
+                q_est_cached = MathUtil.quat_sensor_to_estimator(q_sensor)
+                if self._is_offset_set:
+                    q_yaw = MathUtil.euler_to_quat(np.array([0.0, 0.0, self._yaw_offset_rad]))
+                    q_est_cached = MathUtil.quat_mul(q_yaw, q_est_cached)
+                    q_est_cached = MathUtil.quat_normalize(q_est_cached)
+                    self._quat_est_cached = tuple(q_est_cached)
+
 
         # avoid busy loop
         time.sleep(self.interval)

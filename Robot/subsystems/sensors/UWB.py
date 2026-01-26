@@ -1,3 +1,4 @@
+import math
 from typing import List, Tuple, Optional, Dict, Any
 from .UWBTag import UWBTag, Position
 import logging
@@ -58,6 +59,39 @@ class UWB:
             if pos is not None:
                 positions.append(pos)
         return positions
+    
+    def get_angle(self) -> float | None:
+        """Compute robot heading (radians) corrected for tag offsets.
+
+        Returns robot yaw in radians ([-pi, pi]). Requires at least two tags.
+        """
+        positions = self.get_positions()
+        # need at least two tags to compute heading
+        if len(positions) < 2:
+            return None
+        
+        # instantaneous vector between tags in world frame
+        dx = positions[1].x - positions[0].x
+        dy = positions[1].y - positions[0].y
+        yaw_inst = math.atan2(dy, dx)  # heading of tag-to-tag vector (world)
+
+        # read tag offsets (body-frame) from UWBTag objects, fallback to zero
+        off0 = getattr(self.tags[0], "tag_offset", None) or (0.0, 0.0, 0.0)
+        off1 = getattr(self.tags[1], "tag_offset", None) or (0.0, 0.0, 0.0)
+
+        # delta offset in body frame
+        dx_b = float(off1[0]) - float(off0[0])
+        dy_b = float(off1[1]) - float(off0[1])
+
+        # offset angle in body frame (angle of vector from tag0->tag1 in robot coords)
+        offset_angle = math.atan2(dy_b, dx_b)
+
+        # robot yaw = measured yaw - offset_angle
+        robot_yaw = yaw_inst - offset_angle
+
+        # normalize to [-pi, pi]
+        robot_yaw = (robot_yaw + math.pi) % (2.0 * math.pi) - math.pi
+        return robot_yaw
 
     def connect_all(self) -> List[Tuple[str, bool]]:
         """Attempt to connect all tags. Returns list of (port, success)."""

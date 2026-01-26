@@ -18,6 +18,7 @@ Date: October 15, 2025
 import serial
 import time
 import threading
+import atexit
 from dataclasses import dataclass
 from typing import Optional, Dict, Any, List, Tuple
 import logging
@@ -74,14 +75,24 @@ class UWBTag:
         self.state_estimator = KalmanStateEstimator()
         
         self.position_lock = threading.RLock()
+        # Ensure best-effort cleanup on interpreter exit
+        try:
+            atexit.register(self.disconnect)
+        except Exception:
+            # registration failure shouldn't block normal operation
+            logger.debug("Failed to register atexit disconnect handler")
         
     def connect(self) -> bool:
         """
-        Establish serial connection to DWM1001-DEV tag
-        
+        Establish serial connection to DWM1001-DEV tag with retry/backoff.
+
         Returns:
             bool: True if connection successful, False otherwise
+                   logger.info("Disconnected from DWM1001-DEV")
         """
+        # Ensure any existing connection is cleaned up first
+        self.disconnect()
+        
         try:
             self.serial_connection = serial.Serial(
                 port=self.port,
@@ -108,6 +119,7 @@ class UWBTag:
         except serial.SerialException as e:
             logger.error(f"Failed to connect to {self.port}: {e}")
             return False
+
     
     def disconnect(self):
         """Close the serial connection"""
@@ -118,10 +130,11 @@ class UWBTag:
                 self.serial_connection.write(b'quit\r\n')
                 time.sleep(0.5)
             except:
-                pass
-            self.serial_connection.close()
+                self.serial_connection.close()
+                logger.debug("Serial connection closed without quitting shell")
             logger.info("Disconnected from DWM1001-DEV")
         self.is_connected = False
+        
     
     def get_location_data(self) -> Tuple[Optional[List[Dict[str, Any]]], Optional[Position]]:
         """
@@ -197,10 +210,18 @@ class UWBTag:
                     # malformed anchor block -> stop parsing anchors
                     break
 
+                # Override anchor position if anchor_pos_override is provided
+                anchor_position = (ax, ay, az)
+                if self.anchors_pos_override is not None:
+                    for override_id, override_x, override_y, override_z in self.anchors_pos_override:
+                        if int(anchor_id) == override_id:
+                            anchor_position = (override_x, override_y, override_z)
+                            break
+                            
                 anchors.append({
                     'name': name,
                     'id': anchor_id,
-                    'position': (ax, ay, az),
+                    'position': anchor_position,
                     'range': rng,
                 })
 
@@ -266,25 +287,41 @@ class UWBTag:
         time.sleep(1)
 
         def read_loop():
-            while self.is_reading:
-                anchors, position = self.get_location_data()
-                for anchor in anchors or []:
-                    # convert optional tuple tag_offset to numpy array to satisfy estimator API
-                    self.state_estimator.update_uwb_range(anchor['position'], anchor['range'], np.array(self.tag_offset))
-                
-                # store anchors if provided
-                if anchors:
-                    self.tag_info.anchors = anchors
-                    if debug:   
-                        self.print_anchor_info()
+            try: 
+                while self.is_reading:
+                    anchors, position = self.get_location_data()
 
-                if position:
-                    with self.position_lock:
-                        self.tag_info.position = position
-                    if debug:
-                        self.print_position(position)
-                
-                time.sleep(interval) # TODO check if needed
+                    # store anchors if provided (for diagnostics/visualization only)
+                    if anchors:
+                        self.tag_info.anchors = anchors
+                        if debug:
+                            self.print_anchor_info()
+
+                    # logger.info(f"UWBTag: Read position data {position}")
+
+                    # Use fused POS (world) position for EKF update instead of per-anchor ranges
+                    if position:
+                        with self.position_lock:
+                            self.tag_info.position = position
+
+                        # Build measurement vector and optional tag offset
+                        tag_pos_meas = np.array([position.x, position.y, position.z], dtype=float)
+                        tag_offset_vec = None if self.tag_offset is None else np.array(self.tag_offset, dtype=float)
+
+                        # EKF update    
+                        try:
+                            self.state_estimator.update_uwb_range(tag_pos_meas, tag_offset=tag_offset_vec)
+                        except Exception as e:
+                            logger.debug(f"EKF UWB POS update skipped: {e}")
+
+                        if debug:
+                            self.print_position(position)
+
+                    time.sleep(interval) # TODO check if needed
+            except KeyboardInterrupt:
+                # Graceful exit on Ctrl-C
+                self.disconnect()
+                return
         
         self.read_thread = threading.Thread(target=read_loop, daemon=True)
         self.read_thread.start()

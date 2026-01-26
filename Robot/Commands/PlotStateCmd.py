@@ -12,6 +12,8 @@ from matplotlib import transforms as mtransforms
 from Robot.subsystems.KalmanStateEstimator import KalmanStateEstimator
 from Robot.subsystems.sensors.IMU import IMU
 from Robot.subsystems.sensors.UWB import UWB 
+from Robot.MathUtil import MathUtil
+import time
 
 
 class PlotStateCmd(Command):
@@ -55,7 +57,7 @@ class PlotStateCmd(Command):
         self.imu = IMU()
         self.uwb = UWB()   # <-- ADDED: singleton UWB interface
 
-    def initalize(self):
+    def initialize(self):
         # Create Tk window and Matplotlib canvas. We do NOT call mainloop;
         # instead we call root.update() from execute() so the window is non-blocking.
         if tk is None:
@@ -134,6 +136,9 @@ class PlotStateCmd(Command):
         self.canvas.draw()
         widget = self.canvas.get_tk_widget()
         widget.pack(side=tk.TOP, fill=tk.BOTH, expand=1)
+        
+        self._plot_period = 0.5  # seconds between plot updates
+        self._last_plot_time = 0.0
 
         # keep running until closed
         self._running = True
@@ -143,57 +148,61 @@ class PlotStateCmd(Command):
         if not self._running or self.root is None:
             return
 
-        # get current position from EKF
-        try:
-            pos = self.estimator.pos  # numpy array [x,y,z]
-        except Exception as e:
-            # If estimator fails for any reason, just skip this update
-            print(f"PlotStateCmd: failed to read estimator: {e}")
-            return
+        # Only plot EKF data if the filter has been initialized
+        if self.estimator.is_initialized:
+            # get current position from EKF
+            try:
+                pos = self.estimator.pos  # numpy array [x,y,z]
+            except Exception as e:
+                # If estimator fails for any reason, just skip this update
+                print(f"PlotStateCmd: failed to read estimator: {e}")
+                return
 
-        # safe conversion (in case of None or invalid values)
-        try:
-            x = float(pos[0])
-        except Exception:
-            x = np.nan
-        try:
-            y = float(pos[1])
-        except Exception:
-            y = np.nan
+            # safe conversion (in case of None or invalid values)
+            try:
+                x = float(pos[0])
+            except Exception:
+                x = np.nan
+            try:
+                y = float(pos[1])
+            except Exception:
+                y = np.nan
 
-        self.xs.append(x)
-        self.ys.append(y)
-        if len(self.xs) > self.max_points:
-            self.xs = self.xs[-self.max_points :]
-            self.ys = self.ys[-self.max_points :]
+            self.xs.append(x)
+            self.ys.append(y)
+            if len(self.xs) > self.max_points:
+                self.xs = self.xs[-self.max_points :]
+                self.ys = self.ys[-self.max_points :]
 
-        # update line data and autoscale
-        self.line.set_data(self.xs, self.ys) # type: ignore
-        self.ax.relim() # type: ignore
-        self.ax.autoscale_view() # type: ignore
+            # update line data and autoscale
+            self.line.set_data(self.xs, self.ys) # type: ignore
+            self.ax.relim() # type: ignore
+            self.ax.autoscale_view() # type: ignore
 
-        # update latest point (green)
-        if self.xs and self.ys:
-            x_last, y_last = self.xs[-1], self.ys[-1]
-            if np.isfinite(x_last) and np.isfinite(y_last):
-                self.last_dot.set_data([x_last], [y_last])  # type: ignore
+            # update latest point (green)
+            if self.xs and self.ys:
+                x_last, y_last = self.xs[-1], self.ys[-1]
+                if np.isfinite(x_last) and np.isfinite(y_last):
+                    self.last_dot.set_data([x_last], [y_last])  # type: ignore
 
         # draw and process Tk events in a non-blocking way
-        try:
-            self.canvas.draw_idle() # type: ignore
-            # If draw_idle doesn't immediately draw in some backends, force draw
-            self.canvas.draw() # type: ignore
-            self.root.update_idletasks()
-            self.root.update()
-        except Exception:
-            # If window was closed by user, mark command finished
-            self._running = False
+        now = time.time()
+        if now - self._last_plot_time >= self._plot_period and self.canvas is not None:
+            self.canvas.draw_idle()
+            # optionally do a single draw() if you need synchronous update
+            self.canvas.draw()
+            try:
+                self.root.update_idletasks()
+                self.root.update()
+            except Exception:
+                self._running = False
+            self._last_plot_time = now
 
         # update top-down yaw view (do this after drawing to avoid flicker)
-        if self.ax_top is not None:
-            euler = self.imu.get_euler()
-            yaw = float(euler[0])
-
+        # Only update if estimator is initialized
+        if self.ax_top is not None and self.estimator.is_initialized:
+            euler = self.estimator.euler
+            yaw = np.rad2deg(euler[2])
 
             # apply rotation to truck patches around origin
             trans = mtransforms.Affine2D().rotate(np.deg2rad(yaw)) + self.ax_top.transData
