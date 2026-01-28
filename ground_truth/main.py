@@ -82,14 +82,18 @@ def analyze_state_estimator(state_estimator_df, ground_truth):
     # Extract position columns
     positions = state_estimator_df[['px', 'py']].values
     
+    # Calculate minimum distance from each position to any ground truth line segment
     distances = []
-    for segment in ground_truth:
-        x1, y1 = segment[0]
-        x2, y2 = segment[1]
+    for pos in positions:
+        min_distance = float('inf')
+        for segment in ground_truth:
+            x1, y1 = segment[0]
+            x2, y2 = segment[1]
+            
+            distance = distance_point_to_line_segment(pos[0], pos[1], x1, y1, x2, y2)
+            min_distance = min(min_distance, distance)
         
-        # Calculate distance to closest point on line segment
-        segment_distances = [distance_point_to_line_segment(pos[0], pos[1], x1, y1, x2, y2) for pos in positions]
-        distances.extend(segment_distances)
+        distances.append(min_distance)
     
     distances = np.array(distances)
     
@@ -99,6 +103,7 @@ def analyze_state_estimator(state_estimator_df, ground_truth):
     print(f"Std deviation: {np.std(distances):.4f} meters")
     print(f"Min distance: {np.min(distances):.4f} meters")
     print(f"Max distance: {np.max(distances):.4f} meters")
+    print(f"RMSE: {np.sqrt(np.mean(distances**2)):.4f} meters")
     
     return distances, positions
 
@@ -140,13 +145,18 @@ def analyze_uwb_positions(uwb_positions_df, ground_truth):
     positions = np.array(positions)
     print(f"Total valid UWB samples (averaged for analysis): {len(positions)}")
 
+    # Calculate minimum distance from each position to any ground truth line segment
     distances = []
-    for segment in ground_truth:
-        x1, y1 = segment[0]
-        x2, y2 = segment[1]
+    for pos in positions:
+        min_distance = float('inf')
+        for segment in ground_truth:
+            x1, y1 = segment[0]
+            x2, y2 = segment[1]
 
-        segment_distances = [distance_point_to_line_segment(pos[0], pos[1], x1, y1, x2, y2) for pos in positions]
-        distances.extend(segment_distances)
+            distance = distance_point_to_line_segment(pos[0], pos[1], x1, y1, x2, y2)
+            min_distance = min(min_distance, distance)
+        
+        distances.append(min_distance)
 
     if len(distances) > 0:
         distances = np.array(distances)
@@ -155,6 +165,7 @@ def analyze_uwb_positions(uwb_positions_df, ground_truth):
         print(f"Std deviation: {np.std(distances):.4f} meters")
         print(f"Min distance: {np.min(distances):.4f} meters")
         print(f"Max distance: {np.max(distances):.4f} meters")
+        print(f"RMSE: {np.sqrt(np.mean(distances**2)):.4f} meters")
         return distances, positions, tag1_positions, tag2_positions
 
     print("Could not calculate distances!")
@@ -170,14 +181,25 @@ def compare_systems(state_distances, uwb_distances):
         print("UWB comparison not available (insufficient data)")
         return
     
+    state_rmse = np.sqrt(np.mean(state_distances**2))
+    uwb_rmse = np.sqrt(np.mean(uwb_distances**2))
+    
     print(f"\nState Estimator - Mean Error: {np.mean(state_distances):.4f} m")
+    print(f"State Estimator - RMSE: {state_rmse:.4f} m")
     print(f"UWB Positions  - Mean Error: {np.mean(uwb_distances):.4f} m")
-    print(f"Difference: {abs(np.mean(state_distances) - np.mean(uwb_distances)):.4f} m")
+    print(f"UWB Positions  - RMSE: {uwb_rmse:.4f} m")
+    print(f"Mean Error Difference: {abs(np.mean(state_distances) - np.mean(uwb_distances)):.4f} m")
+    print(f"RMSE Difference: {abs(state_rmse - uwb_rmse):.4f} m")
     
     if np.mean(state_distances) < np.mean(uwb_distances):
-        print("→ State Estimator performs BETTER")
+        print("→ State Estimator performs BETTER (by mean error)")
     else:
-        print("→ UWB Positions performs BETTER")
+        print("→ UWB Positions performs BETTER (by mean error)")
+    
+    if state_rmse < uwb_rmse:
+        print("→ State Estimator performs BETTER (by RMSE)")
+    else:
+        print("→ UWB Positions performs BETTER (by RMSE)")
 
 def plot_comparison(state_distances, state_positions, uwb_distances, uwb_positions, ground_truth, uwb_tag1_positions=None, uwb_tag2_positions=None):
     """Create visualization of the comparison."""
