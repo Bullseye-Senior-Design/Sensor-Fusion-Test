@@ -90,9 +90,7 @@ class UWBTag:
             bool: True if connection successful, False otherwise
                    logger.info("Disconnected from DWM1001-DEV")
         """
-        # Ensure any existing connection is cleaned up first
-        self.disconnect()
-        
+        # Ensure any existing connection is cleaned up first        
         try:
             self.serial_connection = serial.Serial(
                 port=self.port,
@@ -105,12 +103,13 @@ class UWBTag:
             
             # Wait for connection to stabilize
             time.sleep(2)
-            
+            self.disconnect()
+
             # Test connection by sending shell command
             self.serial_connection.write(b'\r')
-            time.sleep(0.5)
+            time.sleep(0.1)
             self.serial_connection.write(b'\r')
-            time.sleep(0.5)
+            time.sleep(0.1)
             
             self.is_connected = True
             logger.info(f"Successfully connected to DWM1001-DEV on {self.port}")
@@ -127,9 +126,10 @@ class UWBTag:
         if self.serial_connection and self.serial_connection.is_open:
             # Exit shell mode before closing
             try:
-                self.serial_connection.write(b'quit\r\n')
-                time.sleep(0.5)
-            except:
+                self.serial_connection.write(b'quit\r')
+                time.sleep(0.1)
+                self.serial_connection.write(b'\r')
+            finally:
                 self.serial_connection.close()
                 logger.debug("Serial connection closed without quitting shell")
             logger.info("Disconnected from DWM1001-DEV")
