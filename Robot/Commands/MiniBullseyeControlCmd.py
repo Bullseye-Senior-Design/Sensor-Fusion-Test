@@ -179,7 +179,7 @@ class MiniBullseyeControlCmd(Command):
             except Exception as e:
                 print(f"MiniBullseyeControlCmd: I2C write failed: {e}")
 
-        print(f"Sent → speed: {speed:4d}   angle: {angle:4d}")
+        #print(f"Sent → speed: {speed:4d}   angle: {angle:4d}")
 
     def _update_and_send(self):
         if self.speed_slider is None or self.steering_slider is None:

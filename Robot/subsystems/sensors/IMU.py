@@ -91,9 +91,6 @@ class IMU():
             self.sensor.offsets_gyroscope,
             self.sensor.offsets_magnetometer))
 
-        # Print any library-provided calibration info (if available)
-        self.print_library_calibration()
-
         # Start continuous update loop immediately (calibration runs in parallel)
         self.begin()
 

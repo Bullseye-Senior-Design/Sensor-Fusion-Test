@@ -63,6 +63,7 @@ class Encoder:
 
     def _gpio_callback(self, channel):
         # Keep callback extremely small: increment count only.
+        logger.info(f"callback callled count={self._count}")
         with self._lock:
             self._count += 1
 
@@ -96,19 +97,21 @@ class Encoder:
 
     def update(self):
         """Update velocity estimate from encoder counts"""
-        with self._lock:
-            current_time = time.time()
-            dt = current_time - self._last_update_time
+        current_time = time.time()
+        dt = current_time - self._last_update_time
             
-            if dt > 0:
-                # Calculate velocity from count changes
-                distance = (self._count / self.counts_per_revolution) * self.wheel_circumference
-                self._velocity = distance / dt
-                self.state_estimator.update_encoder_velocity(self._velocity)
+        if dt > 0:
+            # Calculate velocity from count changes
+            distance = (self._count / self.counts_per_revolution) * self.wheel_circumference
+            self._velocity = distance / dt
+            logger.info(f"Encoder velocity: {self._velocity:.3f} m/s over dt={dt:.3f}s with count={self._count}")
+            self.state_estimator.update_encoder_velocity(self._velocity)
                 
-                # Reset for next interval
+            # Reset for next 
+            with self._lock:
                 self._count = 0
-                self._last_update_time = current_time
+            logger.info(f"count ={self._count} reset for next interval")
+            self._last_update_time = current_time
         
         time.sleep(self.interval)
 
