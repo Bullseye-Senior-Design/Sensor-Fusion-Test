@@ -16,6 +16,7 @@ Date: October 15, 2025
 """
 
 import serial
+import struct
 import time
 import threading
 import atexit
@@ -46,6 +47,12 @@ class TagInfo:
     battery_level: Optional[int] = None
     update_rate: Optional[int] = None
     anchors: Optional[List[Dict[str, Any]]] = None
+
+@dataclass
+class LocationData:
+    """Return type for location data reads."""
+    anchors: Optional[List[Dict[str, Any]]]
+    position: Optional[Position]
 
 class UWBTag:
     """
@@ -83,16 +90,7 @@ class UWBTag:
             logger.debug("Failed to register atexit disconnect handler")
         
     def connect(self) -> bool:
-        """
-        Establish serial connection to DWM1001-DEV tag with retry/backoff.
-
-        Returns:
-            bool: True if connection successful, False otherwise
-                   logger.info("Disconnected from DWM1001-DEV")
-        """
-        # Ensure any existing connection is cleaned up first
-        self.disconnect()
-        
+        """Establish connection in Generic (TLV) Mode"""
         try:
             self.serial_connection = serial.Serial(
                 port=self.port,
@@ -102,22 +100,17 @@ class UWBTag:
                 stopbits=serial.STOPBITS_ONE,
                 bytesize=serial.EIGHTBITS
             )
-            
-            # Wait for connection to stabilize
-            time.sleep(2)
-            
-            # Test connection by sending shell command
-            self.serial_connection.write(b'\r')
-            time.sleep(0.5)
-            self.serial_connection.write(b'\r')
-            time.sleep(0.5)
-            
+
+            # Default is Generic mode; reset buffers
+            self.serial_connection.reset_input_buffer()
+            self.serial_connection.reset_output_buffer()
+
             self.is_connected = True
-            logger.info(f"Successfully connected to DWM1001-DEV on {self.port}")
+            logger.info("Connected in TLV (Generic) Mode")
             return True
-            
+
         except serial.SerialException as e:
-            logger.error(f"Failed to connect to {self.port}: {e}")
+            logger.error(f"Connect failed: {e}")
             return False
 
     
@@ -125,45 +118,75 @@ class UWBTag:
         """Close the serial connection"""
         self.stop_reading()
         if self.serial_connection and self.serial_connection.is_open:
-            # Exit shell mode before closing
             try:
-                self.serial_connection.write(b'quit\r\n')
-                time.sleep(0.5)
-            except:
                 self.serial_connection.close()
-                logger.debug("Serial connection closed without quitting shell")
+            finally:
+                logger.debug("Serial connection closed")
             logger.info("Disconnected from DWM1001-DEV")
         self.is_connected = False
+
+    def request_location_tlv(self):
+        """Sends the dwm_loc_get request (Type=0x0C, Length=0x00)."""
+        # TLV request format is: [Type][Length][Value...]
+        # For dwm_loc_get there is no payload, so Length = 0x00.
+        cmd = bytearray([0x0C, 0x00])
+        if self.serial_connection:
+            self.serial_connection.write(cmd)
+
+    def _read_tlv_frame(self):
+        """Helper to read a single TLV block from the serial stream."""
+        # TLV response framing:
+        # - 1 byte Type
+        # - 1 byte Length
+        # - N bytes Value (N == Length)
+        if not self.serial_connection:
+            return None, None
         
+        t_byte = self.serial_connection.read(1)
+        if not t_byte:
+            return None, None
+
+        l_byte = self.serial_connection.read(1)
+        if not l_byte:
+            return None, None
+
+        length = ord(l_byte)
+        value = self.serial_connection.read(length)
+        return ord(t_byte), value   
     
-    def get_location_data(self) -> Tuple[Optional[List[Dict[str, Any]]], Optional[Position]]:
-        """
-        Get current position from the tag
-        
-        Returns:
-            Tuple of (anchors list or None, Position object or None)
-        """
+    def get_location_data(self) -> LocationData:
+        """Get current position from the tag using TLV parsing."""
         if not self.is_connected or not self.serial_connection:
             logger.error("Not connected to DWM1001-DEV")
-            return None, None
-        
-        try:
-            line = self.serial_connection.readline()    
+            return LocationData(None, None)
 
-            response = line.decode('utf-8', errors='ignore').strip()    
-            
-            # Parse position data
-            # Expected output may contain DIST...ANx... and POS,x,y,z,quality
-            if 'POS' in response or 'DIST' in response:
-                anchors, position = self._parse_position(response)
-                return anchors, position
-            else:
-                # logger.warning(f"No position data in response: {response}")
-                return None, None
-                
-        except Exception as e:
-            logger.error(f"Error getting position: {e}")
-            return None, None
+        # Request a TLV response frame from the tag.
+        self.request_location_tlv()
+
+        pos_data: Optional[Position] = None
+        anchor_list: List[Dict[str, Any]] = []
+
+        # The response to dwm_loc_get is a sequence of TLV blocks. We read a
+        # handful of blocks and extract the ones we care about:
+        #   0x40: Error code
+        #   0x41: Position (x, y, z, qf)
+        #   0x48/0x49: Anchor info / distances (not yet parsed here)
+        for _ in range(5):
+            t, v = self._read_tlv_frame()
+            if t is None:
+                continue
+
+            # Position TLV payload is 13 bytes (little-endian):
+            #   x(int32), y(int32), z(int32), qf(uint8)
+            if t == 0x41 and v and len(v) >= 13:
+                x, y, z, qf = struct.unpack('<iiiB', v[:13])
+                pos_data = Position(x=x, y=y, z=z, quality=qf, timestamp=time.time())
+
+            elif t == 0x48:
+                # Distance Info (Anchor distances) - parsing not implemented
+                pass
+
+        return LocationData(anchor_list if anchor_list else None, pos_data)
     
     def _parse_position(self, response: str) -> Tuple[Optional[List[Dict[str, Any]]], Optional[Position]]:
         """
@@ -283,13 +306,13 @@ class UWBTag:
             return
         
         self.serial_connection.reset_input_buffer()
-        self.serial_connection.write(b'lec\r')  # Get Raw Distance Measurements
-        time.sleep(1)
 
         def read_loop():
             try: 
                 while self.is_reading:
-                    anchors, position = self.get_location_data()
+                    location = self.get_location_data()
+                    anchors = location.anchors
+                    position = location.position
 
                     # store anchors if provided (for diagnostics/visualization only)
                     if anchors:
