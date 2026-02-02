@@ -108,15 +108,15 @@ class Encoder:
         if dt > 0:
             # Calculate velocity from count changes
             with self._lock:
-                distance = (self._count / self.counts_per_revolution) * self.wheel_circumference
-                self._velocity = distance / dt
-                logger.info(f"Encoder velocity: {self._velocity:.3f} m/s over dt={dt:.3f}s with count={self._count}")
-                self.state_estimator.update_encoder_velocity(self._velocity)
+                distance = (self.get_count_and_reset() / self.counts_per_revolution) * self.wheel_circumference
+            
+            logger.info(f"count ={self._count} reset for next interval")
+            self._velocity = distance / dt
+            logger.info(f"Encoder velocity: {self._velocity:.3f} m/s over dt={dt:.3f}s with count={self._count}")
+            self.state_estimator.update_encoder_velocity(self._velocity)
                 
-                # Reset for next 
-                self._count = 0
-                logger.info(f"count ={self._count} reset for next interval")
-                self._last_update_time = current_time
+            # Reset for next 
+            self._last_update_time = current_time
         
         time.sleep(self.interval)
 
@@ -140,9 +140,15 @@ class Encoder:
         with self._lock:
             c = self._count
         return c
+    
+    def get_count_and_reset(self) -> int:
+        """Return the number of callbacks since last reset and reset the counter."""
+        with self._lock:
+            c = self._count
+            self._count = 0
+        return c
 
     def get_velocity(self) -> float:
         """Return current velocity estimate in m/s (forward direction)"""
-        with self._lock:
-            return self._velocity
+        return self._velocity
 
