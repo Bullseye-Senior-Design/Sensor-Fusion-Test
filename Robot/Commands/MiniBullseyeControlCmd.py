@@ -1,170 +1,250 @@
-import tkinter as tk
-import smbus
-import struct
 from structure.commands.Command import Command
+import tkinter as tk
+import smbus2
+
 
 class MiniBullseyeControlCmd(Command):
+    """Command that opens a non-blocking Tkinter GUI to control Mini Bullseye.
+
+    The command remains active until the window is closed or the command
+    is cancelled. GUI updates are handled in execute() so the scheduler
+    can keep running.
     """
-    Command to control Mini Bullseye robot via I2C using a tkinter GUI.
-    Provides sliders for speed and steering angle control, plus emergency stop.
-    """
-    
-    # ================= I2C Configuration =================
-    I2C_BUS = 1
-    ESP32_ADDR = 0x08
-    
-    def __init__(self):
+
+    def __init__(
+        self,
+        i2c_bus: int = 1,
+        esp32_addr: int = 0x08,
+        speed_min: int = 0,
+        speed_max: int = 100,
+        steer_min: int = -30,
+        steer_max: int = 30,
+        speed_step: int = 10,
+        steer_step: int = 5,
+        key_repeat_delay_ms: int = 80,
+    ):
         super().__init__()
+        self.i2c_bus = int(i2c_bus)
+        self.esp32_addr = int(esp32_addr)
+        self.speed_min = int(speed_min)
+        self.speed_max = int(speed_max)
+        self.steer_min = int(steer_min)
+        self.steer_max = int(steer_max)
+        self.speed_step = int(speed_step)
+        self.steer_step = int(steer_step)
+        self.key_repeat_delay_ms = int(key_repeat_delay_ms)
+
+        self._bus = None
+        self._running = False
+
+        # GUI objects
         self.root = None
+        self.status_label = None
         self.speed_slider = None
         self.steering_slider = None
-        self.status_label = None
-        self.bus = None
-        self.running = False
-        
+
+        # keyboard state
+        self.keys_pressed = {"w": False, "a": False, "s": False, "d": False}
+        self._repeat_job = None
+
     def initialize(self):
-        """Initialize I2C bus and create the GUI window."""
+        # Initialize I2C bus (optional for testing without hardware)
         try:
-            self.bus = smbus.SMBus(self.I2C_BUS)
+            self._bus = smbus2.SMBus(self.i2c_bus)
         except Exception as e:
-            print(f"Failed to initialize I2C bus: {e}")
-            return
-        
+            print(f"MiniBullseyeControlCmd: I2C initialization failed: {e}")
+            self._bus = None
+
         # Create GUI
-        self.root = tk.Tk()
-        self.root.title("Mini Bullseye Control")
-        self.root.geometry("400x300")
-        
+        try:
+            self.root = tk.Tk()
+        except Exception as e:
+            print(f"MiniBullseyeControlCmd: failed to create Tk root: {e}")
+            self.root = None
+            self._running = False
+            return
+
+        self.root.title("Mini Bullseye Control - WASD support")
+        self.root.geometry("450x420")
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+
+        # Status label
+        self.status_label = tk.Label(self.root, text="Ready (use WASD or sliders)", font=("Arial", 11))
+        self.status_label.pack(pady=8)
+
         # Speed Slider
         tk.Label(self.root, text="Speed (%)", font=("Arial", 12)).pack()
         self.speed_slider = tk.Scale(
             self.root,
-            from_=0,
-            to=100,
+            from_=self.speed_min,
+            to=self.speed_max,
             orient=tk.HORIZONTAL,
-            length=300,
-            command=lambda x: self._send_command()
+            length=380,
+            resolution=1,
+            command=lambda x: self._update_and_send(),
         )
-        self.speed_slider.pack()
+        self.speed_slider.pack(pady=5)
         self.speed_slider.set(0)
-        
+
         # Steering Slider
         tk.Label(self.root, text="Steering Angle (°)", font=("Arial", 12)).pack()
         self.steering_slider = tk.Scale(
             self.root,
-            from_=-45,
-            to=45,
+            from_=self.steer_min,
+            to=self.steer_max,
             orient=tk.HORIZONTAL,
-            length=300,
-            command=lambda x: self._send_command()
+            length=380,
+            resolution=1,
+            command=lambda x: self._update_and_send(),
         )
-        self.steering_slider.pack()
+        self.steering_slider.pack(pady=5)
         self.steering_slider.set(0)
-        
-        # Status Label
-        self.status_label = tk.Label(self.root, text="Ready", font=("Arial", 10))
-        self.status_label.pack(pady=10)
-        
-        # Emergency Stop Button
+
         tk.Button(
             self.root,
             text="EMERGENCY STOP",
-            font=("Arial", 12, "bold"),
+            font=("Arial", 14, "bold"),
             bg="red",
             fg="white",
-            command=self._emergency_stop
-        ).pack(pady=10)
-        
-        # Close Button
-        tk.Button(
-            self.root,
-            text="Close Control",
-            font=("Arial", 10),
-            command=self._close_window
-        ).pack(pady=5)
-        
-        # Handle window close event
-        self.root.protocol("WM_DELETE_WINDOW", self._close_window)
-        
-        self.running = True
-    
+            width=20,
+            command=self._emergency_stop,
+        ).pack(pady=20)
+
+        # Bind keyboard events (works when window has focus)
+        self.root.bind("<KeyPress>", self._on_key_press)
+        self.root.bind("<KeyRelease>", self._on_key_release)
+        self.root.focus_force()
+
+        self._running = True
+
     def execute(self):
-        """Update the GUI - called repeatedly while command is running."""
-        if self.root and self.running:
-            try:
-                self.root.update()
-            except tk.TclError:
-                # Window was closed
-                self.running = False
-    
+        if not self._running or self.root is None:
+            return
+
+        try:
+            self.root.update_idletasks()
+            self.root.update()
+        except Exception:
+            self._running = False
+
     def end(self, interrupted):
-        """Clean up resources when command ends."""
-        # Send stop command
-        if self.bus:
+        if self._repeat_job is not None and self.root is not None:
             try:
-                self._send_stop_command()
-            except Exception as e:
-                print(f"Failed to send stop command: {e}")
-        
-        # Close GUI
-        if self.root:
+                self.root.after_cancel(self._repeat_job)
+            except Exception:
+                pass
+            self._repeat_job = None
+
+        if self.root is not None:
             try:
                 self.root.destroy()
-            except:
+            except Exception:
                 pass
-        
-        # Close I2C bus
-        if self.bus:
+            self.root = None
+
+        if self._bus is not None:
             try:
-                self.bus.close()
-            except:
+                self._bus.close()
+            except Exception:
                 pass
-        
-        self.running = False
-    
+            self._bus = None
+
+        if interrupted:
+            print("MiniBullseyeControlCmd: interrupted")
+
     def is_finished(self):
-        """Command is finished when GUI window is closed."""
-        return not self.running
-    
-    # ================= Private Methods =================
-    
-    def _send_command(self):
-        """Send current angle and speed values to ESP32 via I2C."""
-        if not self.bus:
+        return not self._running
+
+    def _on_close(self):
+        self._running = False
+        if self.root is not None:
+            try:
+                self.root.destroy()
+            except Exception:
+                pass
+            self.root = None
+
+    def _send_data(self, speed, angle):
+        speed = max(-32768, min(32767, int(speed)))
+        angle = max(-32768, min(32767, int(angle)))
+
+        data = [
+            (speed >> 8) & 0xFF, speed & 0xFF,
+            (angle >> 8) & 0xFF, angle & 0xFF,
+        ]
+
+        if self._bus:
+            try:
+                self._bus.write_i2c_block_data(self.esp32_addr, 0, data)
+            except Exception as e:
+                print(f"MiniBullseyeControlCmd: I2C write failed: {e}")
+
+        #print(f"Sent → speed: {speed:4d}   angle: {angle:4d}")
+
+    def _update_and_send(self):
+        if self.speed_slider is None or self.steering_slider is None:
             return
-        
-        angle = self.steering_slider.get()
         speed = self.speed_slider.get()
-        
-        # Pack: int16 (angle) + uint8 (speed)
-        data = struct.pack('<hB', angle, speed)
-        
-        try:
-            self.bus.write_i2c_block_data(self.ESP32_ADDR, 0, list(data))
+        angle = self.steering_slider.get()
+        self._send_data(speed, angle)
+        if self.status_label is not None:
             self.status_label.config(
-                text=f"Sent → Angle: {angle}°, Speed: {speed}%",
-                fg="green"
+                text=f"Speed: {speed:3d}%   |   Steering: {angle:3d}°",
+                fg="black",
             )
-        except Exception as e:
-            self.status_label.config(text=f"I2C Error: {e}", fg="red")
-    
-    def _send_stop_command(self):
-        """Send stop command (speed=0, angle=0) to ESP32."""
-        if not self.bus:
-            return
-        
-        data = struct.pack('<hB', 0, 0)
-        try:
-            self.bus.write_i2c_block_data(self.ESP32_ADDR, 0, list(data))
-        except Exception as e:
-            print(f"Failed to send stop command: {e}")
-    
+
     def _emergency_stop(self):
-        """Emergency stop - reset all controls to zero."""
+        if self.speed_slider is None or self.steering_slider is None:
+            return
         self.speed_slider.set(0)
         self.steering_slider.set(0)
-        self._send_command()
-    
-    def _close_window(self):
-        """Handle window close event."""
-        self.running = False
+        self._update_and_send()
+        if self.status_label is not None:
+            self.status_label.config(text="EMERGENCY STOP – all zeroed", fg="red")
+
+    def _on_key_press(self, event):
+        key = event.keysym.lower()
+        if key in self.keys_pressed:
+            self.keys_pressed[key] = True
+            if self._repeat_job is not None and self.root is not None:
+                try:
+                    self.root.after_cancel(self._repeat_job)
+                except Exception:
+                    pass
+                self._repeat_job = None
+            self._repeat_action()
+
+    def _on_key_release(self, event):
+        key = event.keysym.lower()
+        if key in self.keys_pressed:
+            self.keys_pressed[key] = False
+
+    def _repeat_action(self):
+        if self.speed_slider is None or self.steering_slider is None:
+            return
+
+        changed = False
+
+        if self.keys_pressed["w"] and not self.keys_pressed["s"]:
+            new_speed = min(self.speed_max, self.speed_slider.get() + self.speed_step)
+            self.speed_slider.set(new_speed)
+            changed = True
+        elif self.keys_pressed["s"] and not self.keys_pressed["w"]:
+            new_speed = max(self.speed_min, self.speed_slider.get() - self.speed_step)
+            self.speed_slider.set(new_speed)
+            changed = True
+
+        if self.keys_pressed["a"] and not self.keys_pressed["d"]:
+            new_angle = max(self.steer_min, self.steering_slider.get() - self.steer_step)
+            self.steering_slider.set(new_angle)
+            changed = True
+        elif self.keys_pressed["d"] and not self.keys_pressed["a"]:
+            new_angle = min(self.steer_max, self.steering_slider.get() + self.steer_step)
+            self.steering_slider.set(new_angle)
+            changed = True
+
+        if changed:
+            self._update_and_send()
+
+        if any(self.keys_pressed.values()) and self.root is not None:
+            self._repeat_job = self.root.after(self.key_repeat_delay_ms, self._repeat_action)
