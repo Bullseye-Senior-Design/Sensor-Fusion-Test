@@ -68,6 +68,11 @@ class Encoder:
 
     def run(self):
         """Start monitoring the GPIO pin"""
+        # Prevent multiple threads from being started
+        if self._running:
+            logger.warning(f"Encoder already running on GPIO {self.pin}")
+            return
+        
         self._running = True
 
         GPIO.setmode(GPIO.BCM)
