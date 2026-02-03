@@ -308,6 +308,8 @@ class UWBTag:
             return
         
         self.serial_connection.reset_input_buffer()
+        
+        self.last_read_time = 0.0
 
         def read_loop():
             try: 
@@ -341,8 +343,9 @@ class UWBTag:
 
                         if debug:
                             self.print_position(position)
-
-                    time.sleep(interval) # TODO check if needed
+                    
+                    logger.info("Time since last read: %.3f seconds", time.time() - self.last_read_time)
+                    self.last_read_time = time.time()
             except KeyboardInterrupt:
                 # Graceful exit on Ctrl-C
                 self.disconnect()
