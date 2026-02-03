@@ -128,7 +128,7 @@ class UWB:
                         else:
                             ok = True
                         if ok:
-                            tag.start_continuous_reading(self.interval)
+                            tag.start_continuous_reading()
                             break
                     except Exception:
                         logger.exception(f"Boot: error starting {tag.port}")
