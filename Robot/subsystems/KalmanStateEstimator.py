@@ -1,5 +1,3 @@
-
-            
 """Extended Kalman Filter for 9-axis IMU (accel, gyro, mag) and UWB ranges.
 
 Trimmed variant: state vector (10) = [pos(3), vel(3), quat(4)].
@@ -21,8 +19,8 @@ from dataclasses import dataclass
 from typing import Tuple
 from Robot.MathUtil import MathUtil
 import time
-from Debug import Debug
 
+GRAVITY = np.array([0.0, 0.0, -9.80665])
 
 @dataclass
 class State:
@@ -65,19 +63,26 @@ class KalmanStateEstimator:
         self.P[6:9, 6:9] = P_att
 
         # Process noise (continuous) in error-state (9x9)
-        q_pos = 1e-3
-        q_vel = 1e-2
-        q_att = 1e-2
+        q_pos = 1e-2
+        q_vel = 1e-1
+        q_att = 1e-1
         self.Qc = block_diag(np.eye(3) * q_pos, np.eye(3) * q_vel, np.eye(3) * q_att)
 
         # Measurement noise templates
         self.R_uwb_range = 0.1 ** 2  # 10 cm sigma default (variance)
         # IMU attitude measurement noise (small-angle residuals)
         # default sigma ~0.02 rad (~1.15 deg)
-        self.imu_attitude_sigma = 0.04
+        self.imu_attitude_sigma = 0.02
         self.R_imu_attitude = np.eye(3) * (self.imu_attitude_sigma ** 2)
         # Encoder velocity measurement noise (m/s)^2
         self.R_encoder_velocity = (0.05 ** 2)  # 0.05 m/s sigma
+        
+        # Bicycle model parameters
+        self.L = 0.5  # Wheelbase: distance from rear to front axle [m]
+        
+        # Control inputs (updated externally before predict)
+        self.u_velocity = 0.0  # Rear wheel velocity [m/s]
+        self.u_steering = 0.0  # Front wheel steering angle [rad]
         
         threading.Thread(target=self._run_loop, daemon=True).start()
 
@@ -110,31 +115,72 @@ class KalmanStateEstimator:
                 vel=tuple(self.x[3:6]),
                 quat=tuple(self.x[6:10]),
             )
-        
+    
+    # --- Control input setters (called by sensors before predict) ---
+    def set_rear_wheel_velocity(self, v: float):
+        """Set rear wheel velocity control input [m/s]."""
+        with self._lock:
+            self.u_velocity = float(v) if np.isfinite(v) else 0.0
+    
+    def set_steering_angle(self, angle: float):
+        """Set front wheel steering angle control input [rad]."""
+        with self._lock:
+            self.u_steering = float(angle) if np.isfinite(angle) else 0.0
+    
     def _run_loop(self):
         """Background thread to run predict at fixed dt intervals."""
+        import time
         next_time = time.time()
         while True:
-            next_time += self.dt / Debug.time_scale
-            self.predict()
+            next_time += self.dt
+            # Only run predict if filter has been initialized
+            if self.is_initialized:
+                self.predict()
             sleep_duration = next_time - time.time()
             if sleep_duration > 0:
                 time.sleep(sleep_duration)
+    
+    def constant_velocity_predict(self):
+        if not self.is_initialized:
+            return
+        
+        with self._lock:
+            dt = self.dt
+            
+            # Position integration
+            self.x[0:3] = self.pos + self.vel * dt
+            
+            # Velocity remains constant
+            self.x[3:6] = self.vel
+            
+            # Attitude remains constant
+            self.x[6:10] = self.quat
+            
+            # Error-state Jacobian F (9x9)
+            F = np.zeros((9, 9))
+            F[0:3, 3:6] = np.eye(3)  # position ← velocity
+            
+            # Discretize and propagate covariance
+            Phi = np.eye(9) + F * dt
+            Qd = Phi @ (self.Qc * dt) @ Phi.T
+            self.P = Phi @ self.P @ Phi.T + Qd
 
-    # TODO: Look into adding control inputs to the predict step    
     def predict(self):
-        """Predict step using IMU acceleration (body frame) when available.
-
-        - Reads accel from the IMU singleton (IMU().get_accel()).
-        - Converts accel to world frame using current quaternion, subtracts GRAVITY
-          to get linear acceleration in world frame.
-        - Integrates velocity and position with simple constant-acceleration kinematics.
-        - Keeps the existing error-state covariance propagation.
-
-        Additional safety:
-        - Reject non-finite, implausibly large or spikey accel samples.
-        - After several consecutive rejections, fall back to constant-velocity
-          until a valid sample arrives.
+        """Bicycle kinematic model prediction.
+        
+        Model: Two-wheel bicycle (front steerable, rear drive)
+        Control inputs:
+          - u_velocity: rear wheel velocity [m/s]
+          - u_steering: front wheel steering angle [rad]
+        
+        Kinematics:
+          Yaw rate: ω = (v / L) * tan(δ)
+          Body velocity: v_body = [v, 0, 0]
+          World velocity: v_world = R(q) @ v_body
+        
+        Integration:
+          pos = pos + v_world * dt
+          q = q ⊗ exp(0.5 * [0, 0, ω] * dt)
         """
         # Don't predict if not yet initialized
         if not self.is_initialized:
@@ -142,22 +188,54 @@ class KalmanStateEstimator:
 
         with self._lock:
             dt = self.dt
-
-            # fallback: constant velocity (no accel)
-            self.x[0:3] = self.pos + self.vel * dt
-            self.x[3:6] = self.vel
-
-            # Linearized F for error-state propagation (9x9) with pos <- vel coupling
+            
+            # Get control inputs
+            v = self.u_velocity
+            delta = self.u_steering
+            
+            # Bicycle model: yaw rate from steering geometry
+            # ω = (v / L) * tan(δ)
+            if abs(delta) < 1e-6 or abs(v) < 1e-6:
+                omega_z = 0.0
+            else:
+                omega_z = (v / self.L) * np.tan(delta)
+            
+            # Body-frame velocity (rear wheel point)
+            v_body = np.array([v, 0.0, 0.0])
+            
+            # Current rotation (body to world)
+            q = MathUtil.quat_normalize(self.quat)
+            R = MathUtil.quat_to_rotmat(q)
+            
+            # Transform to world frame
+            v_world = R @ v_body
+            
+            # Position integration
+            self.x[0:3] = self.pos + v_world * dt
+            
+            # Velocity state
+            self.x[3:6] = v_world
+            
+            # Orientation integration
+            omega_body = np.array([0.0, 0.0, omega_z])
+            q_dot = 0.5 * MathUtil.quat_mul(q, np.append(omega_body, 0.0))
+            q_new = q + q_dot * dt
+            self.x[6:10] = MathUtil.quat_normalize(q_new)
+            
+            # Error-state Jacobian F (9x9)
             F = np.zeros((9, 9))
-            F[0:3, 3:6] = np.eye(3)
-
-            # Discretize
+            F[0:3, 3:6] = np.eye(3)  # position ← velocity
+            
+            # velocity ← attitude (∂(R @ v_body)/∂θ ≈ R @ [v_body]ₓ)
+            def skew(vec):
+                return np.array([[0, -vec[2], vec[1]],
+                                 [vec[2], 0, -vec[0]],
+                                 [-vec[1], vec[0], 0]])
+            F[3:6, 6:9] = R @ skew(v_body)
+            
+            # Discretize and propagate covariance
             Phi = np.eye(9) + F * dt
-
-            # Discrete Q (use existing continuous Qc)
             Qd = Phi @ (self.Qc * dt) @ Phi.T
-
-            # Covariance propagate
             self.P = Phi @ self.P @ Phi.T + Qd
 
     def update_uwb_range(self, tag_pos_meas: np.ndarray, tag_offset: np.ndarray | None = None, use_offset: bool = True):
@@ -237,8 +315,8 @@ class KalmanStateEstimator:
         Provide a quaternion q_meas = [qx,qy,qz,qw] The measurement residual is
         the small-angle vector from the quaternion error:
 
-            q_err = q_meas âŠ— conj(q_est)  (ensure qw >= 0)
-            y â‰ˆ 2 * q_err.xyz  (3x1)
+            q_err = q_meas ⊗ conj(q_est)  (ensure qw >= 0)
+            y ≈ 2 * q_err.xyz  (3x1)
 
         The measurement Jacobian for the error-state is simply H = [0 0 I 0 0]
         for the attitude block, making this a direct attitude observation.
@@ -319,16 +397,16 @@ class KalmanStateEstimator:
 
             y = z - h  # innovation (scalar)
 
-            # print(f"predicted body frame forward velocity {z:.3f} m/s, measured {h:.3f} m/s, residual {y:.3f} m/s")
+            #print(f"predicted body frame forward velocity {z:.3f} m/s, measured {h:.3f} m/s, residual {y:.3f} m/s")
 
             # Jacobian H (1x9): wrt error-state [pos, vel, att_err]
             H = np.zeros((1, 9))
-            # âˆ‚h/âˆ‚vel = R^T[0,:]
+            # ∂h/∂vel = R^T[0,:]
             H[0, 3:6] = R_T[0, :]
             
-            # âˆ‚h/âˆ‚Î¸: derivative of (R^T @ v) w.r.t. attitude
-            # For small angle Î´Î¸: Î´(R^T @ v) â‰ˆ -R^T @ [v]_x @ Î´Î¸
-            # So âˆ‚h/âˆ‚Î¸ = -e_x^T @ R^T @ [v]_x = -R^T[0,:] @ [v]_x
+            # ∂h/∂θ: derivative of (R^T @ v) w.r.t. attitude
+            # For small angle δθ: δ(R^T @ v) ≈ -R^T @ [v]_x @ δθ
+            # So ∂h/∂θ = -e_x^T @ R^T @ [v]_x = -R^T[0,:] @ [v]_x
             def skew(v):
                 return np.array([[0, -v[2], v[1]],
                                  [v[2], 0, -v[0]],

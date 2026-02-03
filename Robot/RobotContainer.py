@@ -15,4 +15,4 @@ class RobotContainer:
                     
     def begin_data_log(self):
         LogKalmanCmd().schedule()
-        # PlotStateCmd().schedule()
+        PlotStateCmd().schedule()
