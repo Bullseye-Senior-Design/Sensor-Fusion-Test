@@ -172,7 +172,7 @@ def analyze_uwb_positions(uwb_positions_df, ground_truth):
     return None, None, tag1_positions, tag2_positions
 
 def compare_systems(state_distances, uwb_distances):
-    """Compare Extended Kalman Filter and UWB system performance."""
+    """Compare Sensor Fusion and UWB system performance."""
     print("\n" + "="*70)
     print("SYSTEM COMPARISON")
     print("="*70)
@@ -184,20 +184,20 @@ def compare_systems(state_distances, uwb_distances):
     state_rmse = np.sqrt(np.mean(state_distances**2))
     uwb_rmse = np.sqrt(np.mean(uwb_distances**2))
     
-    print(f"\nExtended Kalman Filter - Mean Error: {np.mean(state_distances):.4f} m")
-    print(f"Extended Kalman Filter - RMSE: {state_rmse:.4f} m")
+    print(f"\nSensor Fusion - Mean Error: {np.mean(state_distances):.4f} m")
+    print(f"Sensor Fusion - RMSE: {state_rmse:.4f} m")
     print(f"UWB Positions  - Mean Error: {np.mean(uwb_distances):.4f} m")
     print(f"UWB Positions  - RMSE: {uwb_rmse:.4f} m")
     print(f"Mean Error Difference: {abs(np.mean(state_distances) - np.mean(uwb_distances)):.4f} m")
     print(f"RMSE Difference: {abs(state_rmse - uwb_rmse):.4f} m")
     
     if np.mean(state_distances) < np.mean(uwb_distances):
-        print("→ Extended Kalman Filter performs BETTER (by mean error)")
+        print("→ Sensor Fusion performs BETTER (by mean error)")
     else:
         print("→ UWB Positions performs BETTER (by mean error)")
     
     if state_rmse < uwb_rmse:
-        print("→ Extended Kalman Filter performs BETTER (by RMSE)")
+        print("→ Sensor Fusion performs BETTER (by RMSE)")
     else:
         print("→ UWB Positions performs BETTER (by RMSE)")
 
@@ -214,7 +214,7 @@ def plot_comparison(state_distances, state_positions, uwb_distances, uwb_positio
 
     # Plot State Estimator positions
     if state_positions is not None:
-        ax.scatter(state_positions[:, 0], state_positions[:, 1], c='blue', alpha=0.6, s=30, label='Extended Kalman Filter')
+        ax.scatter(state_positions[:, 0], state_positions[:, 1], c='blue', alpha=0.6, s=30, label='Sensor Fusion')
 
     # Plot UWB tag-specific positions
     if uwb_tag1_positions is not None and len(uwb_tag1_positions) > 0:
