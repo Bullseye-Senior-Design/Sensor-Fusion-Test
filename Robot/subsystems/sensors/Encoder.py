@@ -23,8 +23,8 @@ class Encoder:
             cls._instance = super().__new__(cls)
         return cls._instance
     
-    def start(self, pin: int, active_high: bool = True, pull_up: bool = True, debounce_ms: int = 50,
-                 edge: str = 'both', wheel_circumference: float = 0.5, counts_per_revolution: int = 6):
+    def start(self, pin: int, active_high: bool = True, pull_up: bool = True, debounce_ms: int = 100,
+                 edge: str = 'rising', wheel_circumference: float = 0.5, counts_per_revolution: int = 6):
         """Create a proximity sensor reader.
 
         Args:
@@ -48,6 +48,7 @@ class Encoder:
         self._velocity = 0.0  # m/s
         self._last_update_time = time.time()
         self.state_estimator = KalmanStateEstimator()
+        logger.info("edge {edge}, debounce {debounce}ms".format(edge=self.edge, debounce=self.debounce_ms))
         
         # Wheel parameters (customize these)
         self.wheel_circumference = wheel_circumference  # meters (adjust to your wheel)
