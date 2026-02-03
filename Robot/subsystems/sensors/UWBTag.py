@@ -82,6 +82,7 @@ class UWBTag:
         self.state_estimator = KalmanStateEstimator()
         
         self.position_lock = threading.RLock()
+        self.last_position = None
         # Ensure best-effort cleanup on interpreter exit
         try:
             atexit.register(self.disconnect)
@@ -125,236 +126,111 @@ class UWBTag:
             logger.info("Disconnected from DWM1001-DEV")
         self.is_connected = False
 
-    def request_location_tlv(self):
-        """Sends the dwm_loc_get request (Type=0x0C, Length=0x00)."""
-        # TLV request format is: [Type][Length][Value...]
-        # For dwm_loc_get there is no payload, so Length = 0x00.
-        cmd = bytearray([0x0C, 0x00])
-        if self.serial_connection:
-            self.serial_connection.write(cmd)
-
-    def _read_tlv_frame(self):
-        """Helper to read a single TLV block from the serial stream."""
-        # TLV response framing:
-        # - 1 byte Type
-        # - 1 byte Length
-        # - N bytes Value (N == Length)
+    def _read_tlv_frame(self) -> Tuple[Optional[int], Optional[bytes]]:
+        """
+        Optimized TLV reader. Reads header in one go.
+        """
         if not self.serial_connection:
             return None, None
         
-        t_byte = self.serial_connection.read(1)
-        if not t_byte:
+        # Read 2 bytes (Type + Length) at once to reduce USB latency
+        header = self.serial_connection.read(2)
+        if len(header) < 2:
             return None, None
+        
+        t_byte = header[0]
+        l_byte = header[1]
+        
+        if l_byte > 0:
+            value = self.serial_connection.read(l_byte)
+            if len(value) != l_byte:
+                return None, None # Incomplete frame
+            return t_byte, value
+        
+        return t_byte, b''
 
-        l_byte = self.serial_connection.read(1)
-        if not l_byte:
-            return None, None
-
-        length = ord(l_byte)
-        value = self.serial_connection.read(length)
-        return ord(t_byte), value   
-    
     def get_location_data(self) -> LocationData:
-        """Get current position from the tag using TLV parsing."""
-        if not self.is_connected or not self.serial_connection:
-            logger.error("Not connected to DWM1001-DEV")
-            return LocationData(None, None)
-
-        # Request a TLV response frame from the tag.
-        self.request_location_tlv()
-
-        pos_data: Optional[Position] = None
-        anchor_list: List[Dict[str, Any]] = []
-
-        # The response to dwm_loc_get is a sequence of TLV blocks. We block
-        # until we receive the position block:
-        #   0x40: Error code
-        #   0x41: Position (x, y, z, qf)
-        #   0x48/0x49: Anchor info / distances (not yet parsed here)
-        t, v = self._read_tlv_frame()
-        if t is None:
-            return LocationData(None, None)
-
-        # Position TLV payload is 13 bytes (little-endian):
-        #   x(int32), y(int32), z(int32), qf(uint8)
-        # DWM1001-DEV reports position in millimeters, convert to meters
-        if t == 0x41 and v and len(v) >= 13:
-            x, y, z, qf = struct.unpack('<iiiB', v[:13])
-            pos_data = Position(x=x/1000.0, y=y/1000.0, z=z/1000.0, quality=qf, timestamp=time.time())
-            logger.info(f"UWBTag: Parsed position TLV: x={pos_data.x:.3f}, y={pos_data.y:.3f}, z={pos_data.z:.3f}, qf={pos_data.quality}")
-
-        elif t == 0x48:
-            # Distance Info (Anchor distances) - parsing not implemented
-            pass
-
-        return LocationData(anchor_list if anchor_list else None, pos_data)
-    
-    def _parse_position(self, response: str) -> Tuple[Optional[List[Dict[str, Any]]], Optional[Position]]:
-        """
-        Parse position data from DWM1001 response
-        
-        Args:
-            response: Raw response string from DWM1001
-            
-        Returns:
-            Position object or None if parsing fails
-        """
-        try:
-            # Normalize and split tokens
-            parts = [p.strip() for p in response.replace('\n', '').split(',') if p is not None and p.strip() != '']
-            n = len(parts)
-            idx = 0
-
-            anchors: List[Dict[str, Any]] = []
-
-            # If message starts with DIST, skip it and optional count
-            if idx < n and parts[idx].upper() == 'DIST':
-                idx += 1
-                # optional count token
-                if idx < n:
-                    try:
-                        int(parts[idx])
-                        idx += 1
-                    except ValueError:
-                        # not a count, continue
-                        pass
-
-            # Parse anchor blocks: expect sequence of ANx, id, ax, ay, az, range
-            while idx < n and parts[idx].upper().startswith('AN'):
-                if idx + 5 >= n:
-                    break
-                name = parts[idx]
-                anchor_id = parts[idx + 1]
-                try:
-                    ax = float(parts[idx + 2])
-                    ay = float(parts[idx + 3])
-                    az = float(parts[idx + 4])
-                    rng = float(parts[idx + 5])
-                except ValueError:
-                    # malformed anchor block -> stop parsing anchors
-                    break
-
-                # Override anchor position if anchor_pos_override is provided
-                anchor_position = (ax, ay, az)
-                if self.anchors_pos_override is not None:
-                    for override_id, override_x, override_y, override_z in self.anchors_pos_override:
-                        if int(anchor_id) == override_id:
-                            anchor_position = (override_x, override_y, override_z)
-                            break
-                            
-                anchors.append({
-                    'name': name,
-                    'id': anchor_id,
-                    'position': anchor_position,
-                    'range': rng,
-                })
-
-                idx += 6
-
-            # Look for POS token and parse the estimated position
-            pos_x = pos_y = pos_z = None
-            quality = 0
-            while idx < n:
-                if parts[idx].upper() == 'POS' and idx + 3 < n:
-                    try:
-                        pos_x = float(parts[idx + 1])
-                        pos_y = float(parts[idx + 2])
-                        pos_z = float(parts[idx + 3])
-                        if idx + 4 < n:
-                            # quality may be an int or float-like string
-                            try:
-                                quality = int(float(parts[idx + 4]))
-                            except ValueError:
-                                quality = 0
-                    except ValueError:
-                        pos_x = pos_y = pos_z = None
-                    break
-                idx += 1
-
-            # attach anchors to tag_info for external use
-            self.tag_info.anchors = anchors if anchors else None
-
-            if pos_x is None or pos_y is None or pos_z is None:
-                # no POS in message; return anchors and no position
-                return (anchors if anchors else None), None
-
-            position = Position(
-                x=pos_x,
-                y=pos_y,
-                z=pos_z,
-                quality=quality,
-                timestamp=time.time()
-            )
-
-            return (anchors if anchors else None), position
-
-        except Exception as e:
-            logger.error(f"Error parsing position data: {e}")
-            return None, None
-    
-    def start_continuous_reading(self, interval: float = 0.05, debug: bool = False):
-        """
-        Start continuous position reading in a separate thread
-        
-        """
-        if self.is_reading:
-            logger.warning("Already reading continuously")
-            return
-        
-        self.is_reading = True
         if not self.serial_connection:
-            logger.error("Serial connection not established")
-            return
-        
-        self.serial_connection.reset_input_buffer()
-        
-        self.last_read_time = 0.0
+            return LocationData(None, None)
 
+        # Send Request: dwm_loc_get (0x0C)
+        try:
+            self.serial_connection.write(b'\x0C\x00')
+        except serial.SerialTimeoutException:
+            return LocationData(None, None)
+
+        pos_data = None
+        
+        # We might receive multiple TLVs (Error code 0x40, then Position 0x41)
+        # We loop briefly to find 0x41
+        start_time = time.time()
+        while (time.time() - start_time) < 0.05: # 50ms timeout for response
+            t, v = self._read_tlv_frame()
+            if t is None:
+                break
+            
+            # 0x41 = Position Data
+            if t == 0x41 and len(v) >= 13:
+                x, y, z, qf = struct.unpack('<iiiB', v[:13])
+                pos_data = Position(
+                    x=x/1000.0, 
+                    y=y/1000.0, 
+                    z=z/1000.0, 
+                    quality=qf, 
+                    timestamp=time.time()
+                )
+                break # Found what we wanted
+            
+            # 0x40 = Error Code (Usually 0x00 = Success)
+            elif t == 0x40:
+                if len(v) > 0 and v[0] != 0:
+                    # Non-zero error code
+                    pass
+
+        return LocationData(None, pos_data)
+
+    def start_continuous_reading(self):
+        if self.is_reading: return
+        self.is_reading = True
+        
         def read_loop():
-            try: 
-                while self.is_reading:
-                    location = self.get_location_data()
-                    anchors = location.anchors
-                    position = location.position
-
-                    # store anchors if provided (for diagnostics/visualization only)
-                    if anchors:
-                        self.tag_info.anchors = anchors
-                        if debug:
-                            self.print_anchor_info()
-
-                    # logger.info(f"UWBTag: Read position data {position}")
-
-                    # Use fused POS (world) position for EKF update instead of per-anchor ranges
-                    if position:
-                        with self.position_lock:
-                            self.tag_info.position = position
-
-                        # Build measurement vector and optional tag offset
-                        tag_pos_meas = np.array([position.x, position.y, position.z], dtype=float)
-                        tag_offset_vec = None if self.tag_offset is None else np.array(self.tag_offset, dtype=float)
-
-                        # EKF update    
-                        try:
-                            self.state_estimator.update_uwb_range(tag_pos_meas, tag_offset=tag_offset_vec)
-                        except Exception as e:
-                            logger.debug(f"EKF UWB POS update skipped: {e}")
-
-                        if debug:
-                            self.print_position(position)
+            # Local variables for speed
+            last_log_time = time.time()
+            count = 0
+            
+            while self.is_reading:
+                loc_data = self.get_location_data()
+                
+                if loc_data.position:
+                    with self.position_lock:
+                        self.last_position = loc_data.position
                     
-                    logger.info("Time since last read: %.3f seconds", time.time() - self.last_read_time)
-                    self.last_read_time = time.time()
-            except KeyboardInterrupt:
-                # Graceful exit on Ctrl-C
-                self.disconnect()
-                return
-        
+                    # Update EKF
+                    try:
+                        meas = np.array([loc_data.position.x, loc_data.position.y, loc_data.position.z])
+                        self.state_estimator.update_uwb_range(meas)
+                    except Exception:
+                        pass
+                    
+                    count += 1
+
+                # LOGGING: Only log once per second, NOT every frame
+                now = time.time()
+                if now - last_log_time > 1.0:
+                    hz = count / (now - last_log_time)
+                    if self.last_position:
+                        logger.info(f"Rate: {hz:.1f}Hz | Pos: ({self.last_position.x:.2f}, {self.last_position.y:.2f})")
+                    else:
+                        logger.info(f"Rate: {hz:.1f}Hz | No Position Lock")
+                    last_log_time = now
+                    count = 0
+                
+                # Small sleep to prevent CPU hogging, but keep it tight
+                # If target is 20Hz (50ms), sleeping 10ms is safe
+                time.sleep(0.005) 
+
         self.read_thread = threading.Thread(target=read_loop, daemon=True)
         self.read_thread.start()
-        
-        
-        logger.info("Started continuous position reading")
     
     def stop_reading(self):
         """Stop continuous position reading"""
