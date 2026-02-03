@@ -157,6 +157,7 @@ class UWBTag:
         try:
             self.serial_connection.write(b'\x0C\x00')
         except serial.SerialTimeoutException:
+            logger.error("Serial write timeout")
             return LocationData(None, None)
 
         pos_data = None
@@ -166,7 +167,7 @@ class UWBTag:
         start_time = time.time()
         while (time.time() - start_time) < 0.05: # 50ms timeout for response
             t, v = self._read_tlv_frame()
-            if t is None:
+            if t is None or v is None:
                 break
             
             # 0x41 = Position Data
@@ -185,6 +186,7 @@ class UWBTag:
             elif t == 0x40:
                 if len(v) > 0 and v[0] != 0:
                     # Non-zero error code
+                    logger.error(f"DWM1001 Error Code: {v[0]}")
                     pass
 
         return LocationData(None, pos_data)
@@ -226,8 +228,8 @@ class UWBTag:
                     count = 0
                 
                 # Small sleep to prevent CPU hogging, but keep it tight
-                # If target is 20Hz (50ms), sleeping 10ms is safe
-                time.sleep(0.005) 
+                # If target is 10Hz (100ms), sleeping 10ms is safe
+                time.sleep(0.01) 
 
         self.read_thread = threading.Thread(target=read_loop, daemon=True)
         self.read_thread.start()
