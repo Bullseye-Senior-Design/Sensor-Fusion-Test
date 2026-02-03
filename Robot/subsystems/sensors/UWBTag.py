@@ -182,6 +182,8 @@ class UWBTag:
             if t == 0x41 and v and len(v) >= 13:
                 x, y, z, qf = struct.unpack('<iiiB', v[:13])
                 pos_data = Position(x=x/1000.0, y=y/1000.0, z=z/1000.0, quality=qf, timestamp=time.time())
+                if pos_data != self.get_latest_position():
+                    logger.debug(f"UWBTag: Parsed same position TLV: x={pos_data.x:.3f}, y={pos_data.y:.3f}, z={pos_data.z:.3f}, qf={pos_data.quality}")
 
             elif t == 0x48:
                 # Distance Info (Anchor distances) - parsing not implemented
@@ -292,7 +294,7 @@ class UWBTag:
             logger.error(f"Error parsing position data: {e}")
             return None, None
     
-    def start_continuous_reading(self, interval: float = 0.1, debug: bool = False):
+    def start_continuous_reading(self, interval: float = 0.05, debug: bool = False):
         """
         Start continuous position reading in a separate thread
         
