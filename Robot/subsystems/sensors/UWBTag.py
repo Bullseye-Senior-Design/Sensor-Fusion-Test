@@ -27,7 +27,7 @@ import numpy as np
 from Robot.subsystems.KalmanStateEstimator import KalmanStateEstimator
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 @dataclass
@@ -186,7 +186,7 @@ class UWBTag:
             elif t == 0x40:
                 if len(v) > 0 and v[0] != 0:
                     # Non-zero error code
-                    logger.error(f"DWM1001 Error Code: {v[0]}")
+                    logger.warning(f"DWM1001 Error Code: {v[0]}")
                     pass
 
         return LocationData(None, pos_data)
@@ -201,6 +201,8 @@ class UWBTag:
             count = 0
             
             while self.is_reading:
+                start_time = time.time()
+                
                 loc_data = self.get_location_data()
                 
                 if loc_data.position:
@@ -221,15 +223,20 @@ class UWBTag:
                 if now - last_log_time > 1.0:
                     hz = count / (now - last_log_time)
                     if self.last_position:
-                        logger.info(f"Rate: {hz:.1f}Hz | Pos: ({self.last_position.x:.2f}, {self.last_position.y:.2f})")
+                        logger.debug(f"Rate: {hz:.1f}Hz | Pos: ({self.last_position.x:.2f}, {self.last_position.y:.2f})")
                     else:
-                        logger.info(f"Rate: {hz:.1f}Hz | No Position Lock")
+                        logger.debug(f"Rate: {hz:.1f}Hz | No Position Lock")
                     last_log_time = now
                     count = 0
                 
-                # Small sleep to prevent CPU hogging, but keep it tight
-                # If target is 10Hz (100ms), sleeping 10ms is safe
-                time.sleep(0.01) 
+                # 3. Rate Limiting
+                # If the whole transaction took 15ms, and we want 20Hz (50ms),
+                # we sleep for the remaining 35ms.
+                elapsed = time.time() - start_time
+                target_period = 0.05 # 20Hz
+                
+                if elapsed < target_period:
+                    time.sleep(target_period - elapsed)
 
         self.read_thread = threading.Thread(target=read_loop, daemon=True)
         self.read_thread.start()
