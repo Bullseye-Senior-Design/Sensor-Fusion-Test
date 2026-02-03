@@ -104,6 +104,11 @@ class Encoder:
                 # Calculate velocity from count changes
                 distance = (self._count / self.counts_per_revolution) * self.wheel_circumference
                 self._velocity = distance / dt
+                
+                # Set as control input for prediction
+                self.state_estimator.set_rear_wheel_velocity(self._velocity)
+                
+                # Also use as measurement for correction
                 self.state_estimator.update_encoder_velocity(self._velocity)
                 
                 # Reset for next interval
