@@ -74,6 +74,8 @@ class UWBTag:
         self.anchors_pos_override = anchors_pos_override
         self.tag_offset = tag_offset
         
+        self.interval = 0.1  # default read interval in seconds
+        
         self.serial_connection: Optional[serial.Serial] = None
         self.is_connected = False
         self.is_reading = False
@@ -230,10 +232,8 @@ class UWBTag:
                     count = 0
                 
                 # 3. Rate Limiting
-                # If the whole transaction took 15ms, and we want 20Hz (50ms),
-                # we sleep for the remaining 35ms.
                 elapsed = time.time() - start_time
-                target_period = 0.05 # 20Hz
+                target_period = self.interval # 10Hz
                 
                 if elapsed < target_period:
                     time.sleep(target_period - elapsed)
