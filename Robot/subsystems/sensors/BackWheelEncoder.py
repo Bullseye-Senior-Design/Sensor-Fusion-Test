@@ -11,7 +11,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 
 import RPi.GPIO as GPIO
 
-class Encoder:
+class BackWheelEncoder:
     
     _instance = None
 
@@ -23,8 +23,8 @@ class Encoder:
             cls._instance = super().__new__(cls)
         return cls._instance
     
-    def start(self, pin: int, active_high: bool = True, pull_up: bool = True, debounce_ms: int = 50,
-                 edge: str = 'both', wheel_circumference: float = 0.5, counts_per_revolution: int = 6):
+    def start(self, pin: int, active_high: bool = True, pull_up: bool = True, debounce_ms: int = 100,
+                 edge: str = 'rising', wheel_circumference: float = 0.5, counts_per_revolution: int = 6):
         """Create a proximity sensor reader.
 
         Args:
@@ -48,6 +48,7 @@ class Encoder:
         self._velocity = 0.0  # m/s
         self._last_update_time = time.time()
         self.state_estimator = KalmanStateEstimator()
+        logger.info("edge {edge}, debounce {debounce}ms".format(edge=self.edge, debounce=self.debounce_ms))
         
         # Wheel parameters (customize these)
         self.wheel_circumference = wheel_circumference  # meters (adjust to your wheel)
@@ -63,11 +64,17 @@ class Encoder:
 
     def _gpio_callback(self, channel):
         # Keep callback extremely small: increment count only.
+        #logger.info(f"callback callled count={self._count}")
         with self._lock:
             self._count += 1
 
     def run(self):
         """Start monitoring the GPIO pin"""
+        # Prevent multiple threads from being started
+        if self._running:
+            logger.warning(f"Encoder already running on GPIO {self.pin}")
+            return
+        
         self._running = True
 
         GPIO.setmode(GPIO.BCM)
@@ -96,22 +103,21 @@ class Encoder:
 
     def update(self):
         """Update velocity estimate from encoder counts"""
-        with self._lock:
-            current_time = time.time()
-            dt = current_time - self._last_update_time
+        current_time = time.time()
+        dt = current_time - self._last_update_time
             
-            if dt > 0:
-                # Calculate velocity from count changes
-                distance = (self._count / self.counts_per_revolution) * self.wheel_circumference
-                self._velocity = distance / dt
+        if dt > 0:
+            # Calculate velocity from count changes
+            count = self.get_count_and_reset()
+            distance = (count / self.counts_per_revolution) * self.wheel_circumference
+            
+            #logger.info(f"count ={self._count} reset for next interval")
+            self._velocity = distance / dt
+            logger.info(f"Encoder velocity: {self._velocity:.3f} m/s over dt={dt:.3f}s with count={count}")
+            self.state_estimator.update_encoder_velocity(self._velocity)
                 
-                
-                # Also use as measurement for correction
-                self.state_estimator.update_encoder_velocity(self._velocity)
-                
-                # Reset for next interval
-                self._count = 0
-                self._last_update_time = current_time
+            # Reset for next 
+            self._last_update_time = current_time
         
         time.sleep(self.interval)
 
@@ -135,9 +141,15 @@ class Encoder:
         with self._lock:
             c = self._count
         return c
+    
+    def get_count_and_reset(self) -> int:
+        """Return the number of callbacks since last reset and reset the counter."""
+        with self._lock:
+            c = self._count
+            self._count = 0
+        return c
 
     def get_velocity(self) -> float:
         """Return current velocity estimate in m/s (forward direction)"""
-        with self._lock:
-            return self._velocity
+        return self._velocity
 
