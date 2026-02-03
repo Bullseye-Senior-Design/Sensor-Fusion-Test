@@ -178,9 +178,10 @@ class UWBTag:
 
             # Position TLV payload is 13 bytes (little-endian):
             #   x(int32), y(int32), z(int32), qf(uint8)
+            # DWM1001-DEV reports position in millimeters, convert to meters
             if t == 0x41 and v and len(v) >= 13:
                 x, y, z, qf = struct.unpack('<iiiB', v[:13])
-                pos_data = Position(x=x, y=y, z=z, quality=qf, timestamp=time.time())
+                pos_data = Position(x=x/1000.0, y=y/1000.0, z=z/1000.0, quality=qf, timestamp=time.time())
 
             elif t == 0x48:
                 # Distance Info (Anchor distances) - parsing not implemented
