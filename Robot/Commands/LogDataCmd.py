@@ -188,10 +188,10 @@ class LogDataCmd(Command):
         # 4) Encoder data
         try:
             encoder = Encoder()
-            //count = encoder.get_count()
+            # count = encoder.get_count()
             velocity = encoder.get_velocity()
             encoder_file = _make_log_filename('encoder_data')
-            //self.save_encoder_to_csv(count, velocity, encoder_file, timestamp=ts)
+            # self.save_encoder_to_csv(count, velocity, encoder_file, timestamp=ts)
         except Exception as e:
             print(f"Encoder read error: {e}")
     
