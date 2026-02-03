@@ -16,8 +16,8 @@ set ipv4 to '192.168.1.1' and subnet mask to '255.255.255.0'
 
 Using PuTTY to connect to nautical comp
    connect to 192.168.1.2 
-   login as: materov      
-   password: 1234      
+   login as: bull 
+   password: eye 
 
 run the commands:  
     cd Documents/GitHub/Nautical_Comp

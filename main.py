@@ -13,8 +13,7 @@ def main():
 
     robot.robot_init()
     robot_state.enable_teleop()
-    
-    try:
+    try: 
         while True:        
             # Run periodic functions
             robot.robot_periodic()
@@ -39,11 +38,16 @@ def main():
             if robot_state.should_init_disable():
                 robot.disabled_init()
             
+            
+            
             # Add a small delay to prevent high CPU usage
             time.sleep(0.01)
+    
     except KeyboardInterrupt:
         print("Shutting down robot...")
-        UWB().stop_all()
+        robot.shutdown()
+        
+
         
 if __name__ == "__main__":
     main()

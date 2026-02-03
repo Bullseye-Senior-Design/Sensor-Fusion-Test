@@ -372,7 +372,7 @@ class KalmanStateEstimator:
 
             y = z - h  # innovation (scalar)
 
-            print(f"predicted body frame forward velocity {z:.3f} m/s, measured {h:.3f} m/s, residual {y:.3f} m/s")
+            #print(f"predicted body frame forward velocity {z:.3f} m/s, measured {h:.3f} m/s, residual {y:.3f} m/s")
 
             # Jacobian H (1x9): wrt error-state [pos, vel, att_err]
             H = np.zeros((1, 9))
