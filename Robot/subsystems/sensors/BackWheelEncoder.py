@@ -11,7 +11,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 
 import RPi.GPIO as GPIO
 
-class Encoder:
+class BackWheelEncoder:
     
     _instance = None
 

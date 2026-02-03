@@ -9,6 +9,10 @@ class Constants:
     wheel_circumference = 0.25  # meters
     counts_per_revolution = 6  # encoder pulses per wheel rotation
     
+    # Clutches Constants
+    left_clutch_pin = 17
+    right_clutch_pin = 27
+    
     # For the tag offsets:
     # +x : tag is forward of the robot center
     # +y : tag is to the robot's left side

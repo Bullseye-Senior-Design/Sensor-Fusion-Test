@@ -14,7 +14,7 @@ from typing import Optional
 from Robot.subsystems.sensors.UWB import UWB
 from Robot.subsystems.sensors.UWBTag import Position
 from Robot.subsystems.sensors.IMU import IMU
-from Robot.subsystems.sensors.Encoder import Encoder
+from Robot.subsystems.sensors.BackWheelEncoder import Encoder
 from Robot.subsystems.KalmanStateEstimator import KalmanStateEstimator
 
 class LogDataCmd(Command):

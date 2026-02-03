@@ -28,3 +28,6 @@ class Robot:
     
     def disabled_init(self):
         pass
+    
+    def shutdown(self):
+        self.robot_container.shutdown()
