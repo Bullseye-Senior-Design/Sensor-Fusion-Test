@@ -108,11 +108,11 @@ class Encoder:
             
         if dt > 0:
             # Calculate velocity from count changes
-            distance = (self.get_count_and_reset() / self.counts_per_revolution) * self.wheel_circumference
+            count = self.get_count_and_reset()
+            distance = (count / self.counts_per_revolution) * self.wheel_circumference
             
-            logger.info(f"count ={self._count} reset for next interval")
             self._velocity = distance / dt
-            logger.info(f"Encoder velocity: {self._velocity:.3f} m/s over dt={dt:.3f}s with count={self._count}")
+            logger.info(f"Encoder velocity: {self._velocity:.3f} m/s over dt={dt:.3f}s with count={self.count}")
             self.state_estimator.update_encoder_velocity(self._velocity)
                 
             # Reset for next 
