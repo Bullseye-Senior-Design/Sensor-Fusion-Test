@@ -171,22 +171,21 @@ class UWBTag:
         #   0x40: Error code
         #   0x41: Position (x, y, z, qf)
         #   0x48/0x49: Anchor info / distances (not yet parsed here)
-        while pos_data is None:
-            t, v = self._read_tlv_frame()
-            if t is None:
-                continue
+        t, v = self._read_tlv_frame()
+        if t is None:
+            return LocationData(None, None)
 
-            # Position TLV payload is 13 bytes (little-endian):
-            #   x(int32), y(int32), z(int32), qf(uint8)
-            # DWM1001-DEV reports position in millimeters, convert to meters
-            if t == 0x41 and v and len(v) >= 13:
-                x, y, z, qf = struct.unpack('<iiiB', v[:13])
-                pos_data = Position(x=x/1000.0, y=y/1000.0, z=z/1000.0, quality=qf, timestamp=time.time())
-                logger.info(f"UWBTag: Parsed position TLV: x={pos_data.x:.3f}, y={pos_data.y:.3f}, z={pos_data.z:.3f}, qf={pos_data.quality}")
+        # Position TLV payload is 13 bytes (little-endian):
+        #   x(int32), y(int32), z(int32), qf(uint8)
+        # DWM1001-DEV reports position in millimeters, convert to meters
+        if t == 0x41 and v and len(v) >= 13:
+            x, y, z, qf = struct.unpack('<iiiB', v[:13])
+            pos_data = Position(x=x/1000.0, y=y/1000.0, z=z/1000.0, quality=qf, timestamp=time.time())
+            logger.info(f"UWBTag: Parsed position TLV: x={pos_data.x:.3f}, y={pos_data.y:.3f}, z={pos_data.z:.3f}, qf={pos_data.quality}")
 
-            elif t == 0x48:
-                # Distance Info (Anchor distances) - parsing not implemented
-                pass
+        elif t == 0x48:
+            # Distance Info (Anchor distances) - parsing not implemented
+            pass
 
         return LocationData(anchor_list if anchor_list else None, pos_data)
     
