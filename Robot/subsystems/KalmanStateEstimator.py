@@ -135,10 +135,35 @@ class KalmanStateEstimator:
             next_time += self.dt
             # Only run predict if filter has been initialized
             if self.is_initialized:
-                self.predict()
+                self.constant_velocity_predict()
             sleep_duration = next_time - time.time()
             if sleep_duration > 0:
                 time.sleep(sleep_duration)
+    
+    def constant_velocity_predict(self):
+        if not self.is_initialized:
+            return
+        
+        with self._lock:
+            dt = self.dt
+            
+            # Position integration
+            self.x[0:3] = self.pos + self.vel * dt
+            
+            # Velocity remains constant
+            self.x[3:6] = self.vel
+            
+            # Attitude remains constant
+            self.x[6:10] = self.quat
+            
+            # Error-state Jacobian F (9x9)
+            F = np.zeros((9, 9))
+            F[0:3, 3:6] = np.eye(3)  # position ← velocity
+            
+            # Discretize and propagate covariance
+            Phi = np.eye(9) + F * dt
+            Qd = Phi @ (self.Qc * dt) @ Phi.T
+            self.P = Phi @ self.P @ Phi.T + Qd
 
     def predict(self):
         """Bicycle kinematic model prediction.
