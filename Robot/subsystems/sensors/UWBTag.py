@@ -59,14 +59,14 @@ class UWBTag:
     Class to handle communication with DWM1001-DEV tag and read position data
     """
 
-    def __init__(self, port: str, anchors_pos_override: Optional[List[Tuple[int, float, float, float]]] = None, baudrate: int = 115200, timeout: float = 1.0, tag_offset: Optional[Tuple[float, float, float]] = None):
+    def __init__(self, port: str, anchors_pos_override: Optional[List[Tuple[int, float, float, float]]] = None, baudrate: int = 115200, timeout: Optional[float] = None, tag_offset: Optional[Tuple[float, float, float]] = None):
         """
         Initialize the DWM1001 reader
         
         Args:
             port: Serial port (e.g., 'COM3' on Windows, '/dev/ttyUSB0' on Linux)
             baudrate: Serial communication baud rate (default: 115200)
-            timeout: Serial read timeout in seconds
+            timeout: Serial read timeout in seconds (None blocks until data)
         """
         self.port = port
         self.baudrate = baudrate
@@ -166,12 +166,12 @@ class UWBTag:
         pos_data: Optional[Position] = None
         anchor_list: List[Dict[str, Any]] = []
 
-        # The response to dwm_loc_get is a sequence of TLV blocks. We read a
-        # handful of blocks and extract the ones we care about:
+        # The response to dwm_loc_get is a sequence of TLV blocks. We block
+        # until we receive the position block:
         #   0x40: Error code
         #   0x41: Position (x, y, z, qf)
         #   0x48/0x49: Anchor info / distances (not yet parsed here)
-        for _ in range(5):
+        while pos_data is None:
             t, v = self._read_tlv_frame()
             if t is None:
                 continue
