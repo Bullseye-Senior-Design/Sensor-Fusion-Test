@@ -50,7 +50,7 @@ class MPCNavigator(Subsystem):
                            [self.v_bounds[1], self.delta_bounds[1]] * self.p)
         
         # Setup MPC solver
-        self.solver, self.n_states, self.n_controls = self._setup_mpc()
+        self.solver, self.n_states, self.n_controls = self._setup_mpc()r
         
         # Constraint bounds (g=0 for initial state and dynamics)
         self.lbg = np.zeros((self.p + 1) * self.n_states)
