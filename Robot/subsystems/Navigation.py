@@ -13,17 +13,8 @@ class MPCNavigator(Subsystem):
     This class wraps the MPC solver and provides a threaded interface for
     continuous path following using feedback from the KalmanStateEstimator.
     """
-    _instance = None
     
-    def __new__(cls):
-        # If the instance is None, create a new instance
-        # Otherwise, return already created instance
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._initialize()
-        return cls._instance
-    
-    def _initialize(self):
+    def __init__(self):
         """Initialize MPC Navigator with default parameters."""
         # ────────────────────────────────────────────────
         # Parameters & Constants
@@ -297,30 +288,3 @@ class MPCNavigator(Subsystem):
                 time.sleep(sleep_duration)
         
         print("MPC control loop stopped")
-
-
-# ────────────────────────────────────────────────
-# Example Usage
-# ────────────────────────────────────────────────
-if __name__ == "__main__":
-    # Create navigator
-    navigator = MPCNavigator()
-    
-    # Create a simple straight path
-    num_points = 200
-    path_matrix = np.zeros((num_points, 3))
-    path_matrix[:, 0] = np.linspace(0, 100, num_points)  # Straight line in x
-    
-    # Set path and start
-    navigator.set_path(path_matrix)
-    navigator.start_path_following()
-    
-    try:
-        # Poll for commands
-        while True:
-            time.sleep(0.5)
-            v, delta = navigator.get_current_commands()
-            print(f"Current commands: V={v:.2f} m/s, δ={np.degrees(delta):.1f}°")
-    except KeyboardInterrupt:
-        print("\nStopping...")
-        navigator.stop_path_following()
