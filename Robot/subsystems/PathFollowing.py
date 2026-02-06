@@ -7,7 +7,7 @@ from Robot.subsystems.KalmanStateEstimator import KalmanStateEstimator
 from structure.Subsystem import Subsystem
 
 
-class MPCNavigator(Subsystem):
+class PathFollowing(Subsystem):
     """Model Predictive Control Navigator for path following.
     
     This class wraps the MPC solver and provides a threaded interface for

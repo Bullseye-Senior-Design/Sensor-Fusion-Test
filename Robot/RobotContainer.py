@@ -3,6 +3,9 @@ from structure.commands.InstantCommand import InstantCommand
 from structure.commands.SequentialCommandGroup import SequentialCommandGroup
 from Robot.subsystems.sensors.UWB import UWB
 from Robot.subsystems.sensors.IMU import IMU
+from Robot.subsystems.PathFollowing import PathFollowing
+from Robot.subsystems.MotorControl import MotorControl
+
 from Robot.subsystems.sensors.BackWheelEncoder import BackWheelEncoder
 from Robot.subsystems.Clutches import Clutches
 from Robot.Commands.LogDataCmd import LogDataCmd
@@ -18,7 +21,10 @@ class RobotContainer:
         self.back_Wheel_encoder = BackWheelEncoder()
         self.imu = IMU()
         self.clutches = Clutches()
+        self.path_following = PathFollowing()
+        self.motor_control = MotorControl()
         
+         # Start subsystems
         self.clutches.start(left_clutch_pin=Constants.left_clutch_pin, right_clutch_pin=Constants.right_clutch_pin)
         self.uwb.start(uwb_tag_data=Constants.uwb_tag_data, anchors_pos=None)
         self.back_Wheel_encoder.start(pin=Constants.back_right_encoder_pin, active_high=True, pull_up=True, debounce_ms=10, edge='falling', wheel_circumference=Constants.wheel_circumference, counts_per_revolution=Constants.counts_per_revolution)
@@ -31,7 +37,7 @@ class RobotContainer:
         # AlignIMUToWorldCmd(tau=0.5, duration=30.0).schedule()
         
     def begin_mini_bullseye_control(self):
-        MiniBullseyeControlCmd().schedule()
+        MiniBullseyeControlCmd(self.motor_control).schedule()
         
     def shutdown(self):
         self.back_Wheel_encoder.stop()

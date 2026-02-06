@@ -1,7 +1,7 @@
 from structure.commands.Command import Command
 import time
 import numpy as np
-from Robot.subsystems.Navigation import MPCNavigator
+from Robot.subsystems.PathFollowing import PathFollowing
 from Robot.subsystems.KalmanStateEstimator import KalmanStateEstimator
 from Robot.subsystems.MotorControl import MotorControl
 
@@ -16,7 +16,7 @@ class FollowPathCmd(Command):
     def __init__(
         self,
         motor_control: MotorControl,
-        navigator: MPCNavigator,
+        path_following: PathFollowing,
     ):
         """Initialize FollowPathCmd with a simple straight path.
         
@@ -25,9 +25,9 @@ class FollowPathCmd(Command):
         """
         super().__init__()
         self.motor_control = motor_control
-        self.navigator = navigator
+        self.path_following = path_following
         self.add_requirement(motor_control)
-        self.add_requirement(navigator)
+        self.add_requirement(path_following)
         
         # Get current position from EKF
         state_estimator = KalmanStateEstimator()
@@ -50,8 +50,8 @@ class FollowPathCmd(Command):
     def initialize(self):
         """Start path following."""
         # Set path and start navigation
-        self.navigator.set_path(self.path_matrix)
-        self.navigator.start_path_following()
+        self.path_following.set_path(self.path_matrix)
+        self.path_following.start_path_following()
         
         self._running = True
         self._last_update_time = time.time()
@@ -64,7 +64,7 @@ class FollowPathCmd(Command):
                 
         try:
             # Get current commands from navigator
-            v_cmd, delta_cmd = self.navigator.get_current_commands()
+            v_cmd, delta_cmd = self.path_following.get_current_commands()
             
             # Convert to motor commands
             # v_cmd is in m/s, delta_cmd is in radians
@@ -82,7 +82,7 @@ class FollowPathCmd(Command):
     def end(self, interrupted):
         """Stop path following and clean up."""
         # Stop navigation
-        self.navigator.stop_path_following()
+        self.path_following.stop_path_following()
         
         # Stop motors
         self.motor_control.stop()
