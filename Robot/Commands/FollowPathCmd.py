@@ -47,8 +47,6 @@ class FollowPathCmd(Command):
         self.path_matrix[:, 1] = start_y + np.linspace(0, distance, num_points) * np.sin(start_yaw)
         self.path_matrix[:, 2] = start_yaw  # Keep same heading
         
-
-        self._running = False
         self._last_update_time = 0.0
         
     def initialize(self):
@@ -64,15 +62,12 @@ class FollowPathCmd(Command):
         
         self.path_following.start_path_following()
         
-        self._running = True
         self._last_update_time = time.time()
         logger.info("FollowPathCmd: Path following initialized")
     
 
     def execute(self):
         """Poll navigation system and send motor commands."""
-        if not self._running:
-            return
                 
         try:
             # Get current commands from navigator
@@ -100,9 +95,7 @@ class FollowPathCmd(Command):
         
         # Stop motors
         self.motor_control.stop()
-        
-        self._running = False
-        
+                
         if interrupted:
             print("FollowPathCmd: interrupted")
         else:
@@ -110,4 +103,4 @@ class FollowPathCmd(Command):
 
     def is_finished(self):
         """Command runs until cancelled."""
-        return not self._running
+        return self.path_following.is_at_goal(0.1)
