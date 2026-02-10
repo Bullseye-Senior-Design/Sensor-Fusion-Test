@@ -1,18 +1,14 @@
+
 #!/usr/bin/env python3
 """
-DWM1001-DEV Tag Position Reader
+DWM1001-DEV Tag Position Reader (Low Latency Mode)
 
 This program reads position data from a DWM1001-DEV Ultra-Wideband (UWB) tag.
-The DWM1001-DEV communicates via UART/Serial interface and provides real-time
-location data in a RTLS (Real Time Location System) network.
-
-Requirements:
-- pyserial library for serial communication
-- DWM1001-DEV tag configured as a tag in RTLS network
-- Proper COM port connection
+Modified for "Saturation Polling" to detect position updates immediately 
+and filter stale data.
 
 Author: Generated for UWB Subsystem
-Date: October 15, 2025
+Date: October 15, 2025 (Modified for Low Latency)
 """
 
 import serial
@@ -39,18 +35,21 @@ class Position:
     quality: int
     timestamp: float
 
+    def __eq__(self, other):
+        if not isinstance(other, Position):
+            return NotImplemented
+        # Exact float comparison is intentional here. 
+        # If the DWM1001 hasn't updated, the bytes in memory are identical.
+        # If it HAS updated, UWB noise ensures at least one float will differ slightly.
+        return self.x == other.x and self.y == other.y and self.z == other.z
+
 @dataclass
 class TagInfo:
-    """Data class to store tag information"""
     node_id: str
-    position: Optional[Position] = None
-    battery_level: Optional[int] = None
-    update_rate: Optional[int] = None
     anchors: Optional[List[Dict[str, Any]]] = None
 
 @dataclass
 class LocationData:
-    """Return type for location data reads."""
     anchors: Optional[List[Dict[str, Any]]]
     position: Optional[Position]
 
@@ -59,22 +58,20 @@ class UWBTag:
     Class to handle communication with DWM1001-DEV tag and read position data
     """
 
-    def __init__(self, port: str, anchors_pos_override: Optional[List[Tuple[int, float, float, float]]] = None, baudrate: int = 115200, timeout: Optional[float] = None, tag_offset: Optional[Tuple[float, float, float]] = None):
+    def __init__(self, port: str, anchors_pos_override: Optional[List[Tuple[int, float, float, float]]] = None, baudrate: int = 115200, timeout: float = 0.05, tag_offset: Optional[Tuple[float, float, float]] = None, interval: float = 0.1):
         """
-        Initialize the DWM1001 reader
+        Initialize the DWM1001 reader in Low Latency Mode.
         
         Args:
-            port: Serial port (e.g., 'COM3' on Windows, '/dev/ttyUSB0' on Linux)
-            baudrate: Serial communication baud rate (default: 115200)
-            timeout: Serial read timeout in seconds (None blocks until data)
+            port: Serial port
+            baudrate: 115200 default
+            timeout: Serial read timeout. Kept low (0.05) for responsiveness.
         """
         self.port = port
         self.baudrate = baudrate
         self.timeout = timeout
-        self.anchors_pos_override = anchors_pos_override
         self.tag_offset = tag_offset
-        
-        self.interval = 0.1  # default read interval in seconds
+        self.anchors_pos_override = anchors_pos_override
         
         self.serial_connection: Optional[serial.Serial] = None
         self.is_connected = False
@@ -84,16 +81,15 @@ class UWBTag:
         self.state_estimator = KalmanStateEstimator()
         
         self.position_lock = threading.RLock()
-        self.last_position = None
-        # Ensure best-effort cleanup on interpreter exit
-        try:
-            atexit.register(self.disconnect)
-        except Exception:
-            # registration failure shouldn't block normal operation
-            logger.debug("Failed to register atexit disconnect handler")
+        self.last_position: Optional[Position] = None
+        
+        # Statistics for debugging
+        self._stats_reads = 0
+        self._stats_updates = 0
+
+        atexit.register(self.disconnect)
         
     def connect(self) -> bool:
-        """Establish connection in Generic (TLV) Mode"""
         try:
             self.serial_connection = serial.Serial(
                 port=self.port,
@@ -101,79 +97,73 @@ class UWBTag:
                 timeout=self.timeout,
                 parity=serial.PARITY_NONE,
                 stopbits=serial.STOPBITS_ONE,
-                bytesize=serial.EIGHTBITS
+                bytesize=serial.EIGHTBITS,
+                write_timeout=0.1
             )
-
-            # Default is Generic mode; reset buffers
             self.serial_connection.reset_input_buffer()
             self.serial_connection.reset_output_buffer()
-
             self.is_connected = True
-            logger.info("Connected in TLV (Generic) Mode")
+            logger.info("Connected to DWM1001 (Generic Mode)")
             return True
-
         except serial.SerialException as e:
             logger.error(f"Connect failed: {e}")
             return False
 
-    
     def disconnect(self):
-        """Close the serial connection"""
         self.stop_reading()
         if self.serial_connection and self.serial_connection.is_open:
             try:
                 self.serial_connection.close()
-            finally:
-                logger.debug("Serial connection closed")
-            logger.info("Disconnected from DWM1001-DEV")
+            except Exception:
+                pass
         self.is_connected = False
+        logger.info("Disconnected")
 
     def _read_tlv_frame(self) -> Tuple[Optional[int], Optional[bytes]]:
-        """
-        Optimized TLV reader. Reads header in one go.
-        """
+        """Reads a TLV frame. Returns (Type, Value) or (None, None)."""
         if not self.serial_connection:
             return None, None
         
-        # Read 2 bytes (Type + Length) at once to reduce USB latency
-        header = self.serial_connection.read(2)
-        if len(header) < 2:
+        try:
+            # Read header (2 bytes)
+            header = self.serial_connection.read(2)
+            if len(header) < 2:
+                return None, None
+            
+            t_byte = header[0]
+            l_byte = header[1]
+            
+            if l_byte > 0:
+                value = self.serial_connection.read(l_byte)
+                if len(value) != l_byte:
+                    return None, None
+                return t_byte, value
+            return t_byte, b''
+        except serial.SerialException:
             return None, None
-        
-        t_byte = header[0]
-        l_byte = header[1]
-        
-        if l_byte > 0:
-            value = self.serial_connection.read(l_byte)
-            if len(value) != l_byte:
-                return None, None # Incomplete frame
-            return t_byte, value
-        
-        return t_byte, b''
 
     def get_location_data(self) -> LocationData:
+        """Sends request and reads response immediately."""
         if not self.serial_connection:
             return LocationData(None, None)
 
-        # Send Request: dwm_loc_get (0x0C)
+        # Write 'dwm_loc_get' (0x0C)
         try:
             self.serial_connection.write(b'\x0C\x00')
-        except serial.SerialTimeoutException:
-            logger.error("Serial write timeout")
+        except Exception:
             return LocationData(None, None)
 
         pos_data = None
         
-        # We might receive multiple TLVs (Error code 0x40, then Position 0x41)
-        # We loop briefly to find 0x41
-        start_time = time.time()
-        while (time.time() - start_time) < 0.05: # 50ms timeout for response
+        # Short loop to capture the response (expecting 0x41 or 0x40)
+        # We don't wait long; we want to fail fast and retry if data is missing
+        start_t = time.perf_counter()
+        while (time.perf_counter() - start_t) < 0.05: 
             t, v = self._read_tlv_frame()
             if t is None or v is None:
-                break
-            
-            # 0x41 = Position Data
-            if t == 0x41 and len(v) >= 13:
+                continue # Keep trying within timeout
+
+            if t == 0x41 and len(v) >= 13: # Position Data
                 x, y, z, qf = struct.unpack('<iiiB', v[:13])
                 pos_data = Position(
                     x=x/1000.0, 
@@ -182,108 +172,95 @@ class UWBTag:
                     quality=qf, 
                     timestamp=time.time()
                 )
-                break # Found what we wanted
+                # We found data, we can return immediately
+                return LocationData(None, pos_data)
             
-            # 0x40 = Error Code (Usually 0x00 = Success)
-            elif t == 0x40:
+            elif t == 0x40: # Error/Status
                 if len(v) > 0 and v[0] != 0:
-                    # Non-zero error code
-                    logger.warning(f"DWM1001 Error Code: {v[0]}")
-                    pass
+                    # If error is legitimate, stop trying this frame
+                    break
 
-        return LocationData(None, pos_data)
+        return LocationData(None, None)
 
     def start_continuous_reading(self):
+        """
+        Starts the high-speed polling loop.
+        It requests data constantly but only processes *changes* in position.
+        """
         if self.is_reading: return
         self.is_reading = True
         
         def read_loop():
-            # Local variables for speed
+            logger.info("Starting high-speed position polling...")
             last_log_time = time.time()
-            count = 0
             
             while self.is_reading:
-                start_time = time.time()
+                self._stats_reads += 1
                 
+                # 1. Get Data (Blocking call via serial, but fast)
                 loc_data = self.get_location_data()
                 
                 if loc_data.position:
+                    process_update = False
+                    
                     with self.position_lock:
-                        self.last_position = loc_data.position
+                        # 2. Check if data is STALE (Duplicate)
+                        # We compare X, Y, Z. If they are identical to the last read,
+                        # the tag has not updated its calculation yet.
+                        if (self.last_position is None) or (loc_data.position != self.last_position):
+                            self.last_position = loc_data.position
+                            process_update = True
+                            self._stats_updates += 1
                     
-                    # Update EKF
-                    try:
-                        meas = np.array([loc_data.position.x, loc_data.position.y, loc_data.position.z])
-                        self.state_estimator.update_uwb_range(meas)
-                    except Exception:
-                        pass
-                    
-                    count += 1
+                    # 3. Only update EKF if the data is NEW
+                    if process_update:
+                        try:
+                            meas = np.array([
+                                loc_data.position.x, 
+                                loc_data.position.y, 
+                                loc_data.position.z
+                            ])
+                            if self.tag_offset:
+                                self.state_estimator.update_uwb_range(meas, np.array(self.tag_offset), True)
+                            else:
+                                self.state_estimator.update_uwb_range(meas, use_offset= False)
+                        except Exception as e:
+                            logger.error(f"EKF Update Error: {e}")
 
-                # LOGGING: Only log once per second, NOT every frame
+                # 4. Reporting (1Hz)
                 now = time.time()
                 if now - last_log_time > 1.0:
-                    hz = count / (now - last_log_time)
-                    if self.last_position:
-                        logger.debug(f"Rate: {hz:.1f}Hz | Pos: ({self.last_position.x:.2f}, {self.last_position.y:.2f})")
-                    else:
-                        logger.debug(f"Rate: {hz:.1f}Hz | No Position Lock")
+                    with self.position_lock:
+                        current = self.last_position
+                    
+                    hz_poll = self._stats_reads / (now - last_log_time)
+                    hz_update = self._stats_updates / (now - last_log_time)
+                    
+                    log_msg = f"Poll: {hz_poll:.0f}Hz | Fresh Updates: {hz_update:.1f}Hz"
+                    if current:
+                        log_msg += f" | Pos: ({current.x:.2f}, {current.y:.2f})"
+                    
+                    logger.debug(log_msg)
+                    
                     last_log_time = now
-                    count = 0
+                    self._stats_reads = 0
+                    self._stats_updates = 0
                 
-                # 3. Rate Limiting
-                elapsed = time.time() - start_time
-                target_period = self.interval # 10Hz
-                
-                if elapsed < target_period:
-                    time.sleep(target_period - elapsed)
+                # 5. NO SLEEP. 
+                # We loop immediately to catch the next UART byte as soon as it arrives.
+                # However, to prevent CPU melting if USB is disconnected, we do a tiny yield
+                # if no data was found, but strictly 0 if we are getting data.
+                if not loc_data.position:
+                    time.sleep(0.0001) 
 
         self.read_thread = threading.Thread(target=read_loop, daemon=True)
         self.read_thread.start()
     
     def stop_reading(self):
-        """Stop continuous position reading"""
         self.is_reading = False
-        if self.read_thread and self.read_thread.is_alive():
-            self.read_thread.join()
-        logger.info("Stopped continuous position reading")
+        if self.read_thread:
+            self.read_thread.join(timeout=1.0)
     
     def get_latest_position(self) -> Optional[Position]:
-        """Get the latest position reading"""
         with self.position_lock:
             return self.last_position
-
-    def get_latest_anchor_info(self) -> Optional[List[Dict[str, Any]]]:
-        """Return the latest anchor information in a thread-safe way.
-
-        Returns a shallow copy of the anchors list (or None) while holding
-        the internal lock to avoid races with the read thread.
-        """
-        with self.position_lock:
-            anchors = self.tag_info.anchors
-            if anchors is None:
-                return None
-            # return a shallow copy so callers cannot mutate internal state
-            return [a.copy() for a in anchors]
-        
-    def print_anchor_info(self):
-        """Print current anchor information"""
-        if not self.tag_info.anchors:
-            logger.info("No anchor information available")
-            return
-        
-        for anchor in self.tag_info.anchors:
-            pos = anchor['position']
-            logger.info(f"Anchor {anchor['name']} (ID: {anchor['id']}): "
-                        f"Position=({pos[0]:.3f}, {pos[1]:.3f}, {pos[2]:.3f}), "
-                        f"Range={anchor['range']:.3f}m")
-
-    def print_position(self, position: Position):
-        """
-        Callback function to handle new position data
-        
-        Args:
-            position: Position object with current location data
-        """
-        logger.info(f"Position: X={position.x:.3f}m, Y={position.y:.3f}m, Z={position.z:.3f}m, "
-            f"Quality={position.quality}, Time={position.timestamp:.2f}")
