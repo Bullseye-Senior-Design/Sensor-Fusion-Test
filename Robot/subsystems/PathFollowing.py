@@ -8,7 +8,7 @@ from Robot.subsystems.KalmanStateEstimator import KalmanStateEstimator
 from structure.Subsystem import Subsystem
 
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger("path_following")
+logger = logging.getLogger(f"{__name__}.PathFollowing")
 
 
 class PathFollowing(Subsystem):

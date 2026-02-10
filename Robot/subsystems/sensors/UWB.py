@@ -6,7 +6,7 @@ import threading
 import time
 from Robot.Constants import UWBTagInfo
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(f"{__name__}.UWB")
 
 
 class UWB:

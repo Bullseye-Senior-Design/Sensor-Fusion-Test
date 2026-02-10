@@ -6,7 +6,7 @@ from datetime import datetime
 import logging
 from Robot.subsystems.KalmanStateEstimator import KalmanStateEstimator
 
-logger = logging.getLogger("ProximitySensor")
+logger = logging.getLogger(f"{__name__}.BackWheelEncoder")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 import RPi.GPIO as GPIO

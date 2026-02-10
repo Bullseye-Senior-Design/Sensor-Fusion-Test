@@ -7,7 +7,7 @@ from Robot.subsystems.MotorControl import MotorControl
 import logging
 
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger("path_following_cmd")
+logger = logging.getLogger(f"{__name__}.FollowPathCmd")
 
 class FollowPathCmd(Command):
     """Command that uses MPCNavigator to follow a path.
@@ -77,6 +77,7 @@ class FollowPathCmd(Command):
             angle_deg = int(np.degrees(delta_cmd))
             
             logger.debug(f"FollowPathCmd: v_cmd={v_cmd:.2f} m/s, delta_cmd={delta_cmd:.2f} rad -> speed={speed_percent}%, angle={angle_deg} deg")
+            print(f"FollowPathCmd: v_cmd={v_cmd:.2f} m/s, delta_cmd={delta_cmd:.2f} rad -> speed={speed_percent}%, angle={angle_deg} deg")
             
             # Send to motors via MotorControl subsystem
             self.motor_control.set_speed_angle(speed_percent, angle_deg)
