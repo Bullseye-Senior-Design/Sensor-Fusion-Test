@@ -13,6 +13,7 @@ from Robot.Commands.PlotStateCmd import PlotStateCmd
 from Robot.Commands.AlignIMUToWorldCmd import AlignIMUToWorldCmd
 from Robot.Commands.ZeroIMUCmd import ZeroIMUCmd
 from Robot.Commands.MiniBullseyeControlCmd import MiniBullseyeControlCmd
+from Robot.Commands.FollowPathCmd import FollowPathCmd
 
 
 class RobotContainer:
@@ -29,7 +30,8 @@ class RobotContainer:
         self.uwb.start(uwb_tag_data=Constants.uwb_tag_data, anchors_pos=None)
         self.back_Wheel_encoder.start(pin=Constants.back_right_encoder_pin, active_high=True, pull_up=True, debounce_ms=10, edge='falling', wheel_circumference=Constants.wheel_circumference, counts_per_revolution=Constants.counts_per_revolution)
         
-        self.motor_control.default_command(MiniBullseyeControlCmd(self.motor_control, self.path_following))
+        # self.motor_control.default_command(MiniBullseyeControlCmd(self.motor_control, self.path_following))
+        self.path_following.default_command(FollowPathCmd(self.motor_control, self.path_following))
                     
     def begin_data_log(self):
         LogDataCmd().schedule()
