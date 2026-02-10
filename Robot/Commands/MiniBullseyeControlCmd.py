@@ -17,7 +17,7 @@ class MiniBullseyeControlCmd(Command):
         self,
         motor_control: MotorControl,
         path_following: PathFollowing,
-        speed_min: int = 0,
+        speed_min: int = -100,
         speed_max: int = 100,
         steer_min: int = -30,
         steer_max: int = 30,
