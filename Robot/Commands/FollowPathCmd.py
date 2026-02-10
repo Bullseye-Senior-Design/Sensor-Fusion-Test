@@ -82,7 +82,7 @@ class FollowPathCmd(Command):
             self.motor_control.set_speed_angle(speed_percent, angle_deg)
             
         except Exception as e:
-            logger.error(f"FollowPathCmd: Error in execute: {e}")
+            logger.info(f"FollowPathCmd: Error in execute: {e}")
 
     def end(self, interrupted):
         """Stop path following and clean up."""
