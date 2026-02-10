@@ -28,6 +28,8 @@ class RobotContainer:
         self.clutches.start(left_clutch_pin=Constants.left_clutch_pin, right_clutch_pin=Constants.right_clutch_pin)
         self.uwb.start(uwb_tag_data=Constants.uwb_tag_data, anchors_pos=None)
         self.back_Wheel_encoder.start(pin=Constants.back_right_encoder_pin, active_high=True, pull_up=True, debounce_ms=10, edge='falling', wheel_circumference=Constants.wheel_circumference, counts_per_revolution=Constants.counts_per_revolution)
+        
+        self.motor_control.default_command(MiniBullseyeControlCmd(self.motor_control, self.path_following))
                     
     def begin_data_log(self):
         LogDataCmd().schedule()
@@ -35,10 +37,7 @@ class RobotContainer:
         ZeroIMUCmd().schedule()
         
         # AlignIMUToWorldCmd(tau=0.5, duration=30.0).schedule()
-        
-    def begin_mini_bullseye_control(self):
-        MiniBullseyeControlCmd(self.motor_control).schedule()
-        
+                
     def shutdown(self):
         self.back_Wheel_encoder.stop()
         self.clutches.stop()

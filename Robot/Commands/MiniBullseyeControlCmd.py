@@ -1,6 +1,8 @@
 from structure.commands.Command import Command
 import tkinter as tk
 from Robot.subsystems.MotorControl import MotorControl
+from Robot.subsystems.PathFollowing import PathFollowing
+from Robot.Commands.FollowPathCmd import FollowPathCmd
 
 
 class MiniBullseyeControlCmd(Command):
@@ -14,6 +16,7 @@ class MiniBullseyeControlCmd(Command):
     def __init__(
         self,
         motor_control: MotorControl,
+        path_following: PathFollowing,
         speed_min: int = 0,
         speed_max: int = 100,
         steer_min: int = -30,
@@ -35,7 +38,8 @@ class MiniBullseyeControlCmd(Command):
         self._running = False
         
         # Get reference to motor control subsystem
-        self.motor_control = MotorControl()
+        self.motor_control = motor_control
+        self.path_following = path_following
 
         # GUI objects
         self.root = None
@@ -182,6 +186,9 @@ class MiniBullseyeControlCmd(Command):
 
     def _on_key_press(self, event):
         key = event.keysym.lower()
+        if key == "o":
+            self._schedule_follow_path()
+            return
         if key in self.keys_pressed:
             self.keys_pressed[key] = True
             if self._repeat_job is not None and self.root is not None:
@@ -226,3 +233,8 @@ class MiniBullseyeControlCmd(Command):
 
         if any(self.keys_pressed.values()) and self.root is not None:
             self._repeat_job = self.root.after(self.key_repeat_delay_ms, self._repeat_action)
+
+    def _schedule_follow_path(self):
+        FollowPathCmd(self.motor_control, self.path_following).schedule()
+        if self.status_label is not None:
+            self.status_label.config(text="FollowPathCmd scheduled", fg="blue")
