@@ -7,7 +7,7 @@ from Robot.subsystems.MotorControl import MotorControl
 import logging
 
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("path_following_cmd")
 
 class FollowPathCmd(Command):
     """Command that uses MPCNavigator to follow a path.

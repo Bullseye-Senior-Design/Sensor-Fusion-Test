@@ -28,7 +28,7 @@ from Robot.subsystems.KalmanStateEstimator import KalmanStateEstimator
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("uwb_tag")
 
 @dataclass
 class Position:
