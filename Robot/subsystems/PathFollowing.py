@@ -67,6 +67,9 @@ class PathFollowing(Subsystem):
         self._last_u = np.array([0.0, 0.0])
         self._x_prev = None  # For warm starting
         
+        # Path completion tracking
+        self.goal_tolerance = 0.1  # meters - distance threshold to consider goal reached
+        
         # Get reference to state estimator
         self.state_estimator = KalmanStateEstimator()
     
@@ -224,6 +227,52 @@ class PathFollowing(Subsystem):
         """Check if path following is active."""
         with self._lock:
             return self._running
+    
+    def is_at_goal(self, tolerance=None):
+        """Check if the robot has reached the end of the path.
+        
+        Args:
+            tolerance: Distance threshold in meters to consider goal reached.
+                      If None, uses self.goal_tolerance (default 0.1m)
+        
+        Returns:
+            bool: True if robot is within tolerance of the final waypoint
+        """
+        if tolerance is None:
+            tolerance = self.goal_tolerance
+            
+        with self._lock:
+            if self.path_matrix is None:
+                logger.warning("is_at_goal called but no path set")
+                return False
+            
+            current_state = self.state_estimator.get_state()
+            distance_to_goal = self._get_distance_to_goal(current_state.pos)
+            return distance_to_goal is not None and distance_to_goal <= tolerance
+    
+    def get_distance_to_goal(self):
+        """Get the current distance to the end of the path.
+        
+        Returns:
+            float: Distance in meters to the final waypoint, or None if no path set
+        """
+        with self._lock:
+            return self._get_distance_to_goal(self.state_estimator.get_state().pos)
+    
+    def _get_distance_to_goal(self, current_state):
+        """Helper function to compute distance to goal from a given state."""
+        with self._lock:
+            if self.path_matrix is None:
+                return None
+            
+            current_x = current_state[0]
+            current_y = current_state[1]
+            
+            goal_x = self.path_matrix[-1, 0]
+            goal_y = self.path_matrix[-1, 1]
+            
+            distance_to_goal = np.sqrt((current_x - goal_x)**2 + (current_y - goal_y)**2)
+            return distance_to_goal
     
     def _control_loop(self):
         """Main control loop running in separate thread."""

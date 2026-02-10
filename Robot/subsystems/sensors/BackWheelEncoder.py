@@ -50,21 +50,15 @@ class BackWheelEncoder:
         self.state_estimator = KalmanStateEstimator()
         logger.info("edge {edge}, debounce {debounce}ms".format(edge=self.edge, debounce=self.debounce_ms))
         
-        # Wheel parameters (customize these)
+        # Wheel parameters
         self.wheel_circumference = wheel_circumference  # meters (adjust to your wheel)
         self.counts_per_revolution = counts_per_revolution  # encoder pulses per wheel rotation
         
         self.run()
 
-        # internal history for optional export
-
-    def _normalize_present(self, raw_state: int) -> bool:
-        # raw_state is 0 or 1
-        return raw_state == (1 if self.active_high else 0)
-
     def _gpio_callback(self, channel):
         # Keep callback extremely small: increment count only.
-        #logger.info(f"callback callled count={self._count}")
+        #logger.info(f"callback called count={self._count}")
         with self._lock:
             self._count += 1
 
