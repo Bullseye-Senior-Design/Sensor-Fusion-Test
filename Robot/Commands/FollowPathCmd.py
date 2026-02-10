@@ -76,9 +76,10 @@ class FollowPathCmd(Command):
             # Convert steering angle from radians to degrees
             angle_deg = int(np.degrees(delta_cmd))
             
+            logger.debug(f"FollowPathCmd: v_cmd={v_cmd:.2f} m/s, delta_cmd={delta_cmd:.2f} rad -> speed={speed_percent}%, angle={angle_deg} deg")
+            
             # Send to motors via MotorControl subsystem
             self.motor_control.set_speed_angle(speed_percent, angle_deg)
-            logger.debug(f"FollowPathCmd: v_cmd={v_cmd:.2f} m/s, delta_cmd={delta_cmd:.2f} rad -> speed={speed_percent}%, angle={angle_deg} deg")
             
         except Exception as e:
             logger.error(f"FollowPathCmd: Error in execute: {e}")
