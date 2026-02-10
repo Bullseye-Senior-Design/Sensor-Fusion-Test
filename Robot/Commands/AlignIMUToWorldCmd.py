@@ -5,7 +5,7 @@ from Robot.subsystems.sensors.IMU import IMU
 from Robot.subsystems.sensors.UWB import UWB
 import logging
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(f"{__name__}.AlignIMUToWorldCmd")
 
 
 def _wrap_angle(a: float) -> float:

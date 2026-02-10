@@ -9,7 +9,6 @@ class Robot:
     def robot_init(self):
         self.command_runner.turn_on()
         self.robot_container.begin_data_log()
-        self.robot_container.begin_mini_bullseye_control()
     
     def robot_periodic(self):
         self.command_runner.run_commands()

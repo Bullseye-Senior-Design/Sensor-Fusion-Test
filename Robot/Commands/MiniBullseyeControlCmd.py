@@ -1,6 +1,8 @@
 from structure.commands.Command import Command
 import tkinter as tk
-import smbus2
+from Robot.subsystems.MotorControl import MotorControl
+from Robot.subsystems.PathFollowing import PathFollowing
+from Robot.Commands.FollowPathCmd import FollowPathCmd
 
 
 class MiniBullseyeControlCmd(Command):
@@ -8,14 +10,14 @@ class MiniBullseyeControlCmd(Command):
 
     The command remains active until the window is closed or the command
     is cancelled. GUI updates are handled in execute() so the scheduler
-    can keep running.
+    can keep running. Uses MotorControl subsystem for motor commands.
     """
 
     def __init__(
         self,
-        i2c_bus: int = 1,
-        esp32_addr: int = 0x08,
-        speed_min: int = 0,
+        motor_control: MotorControl,
+        path_following: PathFollowing,
+        speed_min: int = -100,
         speed_max: int = 100,
         steer_min: int = -30,
         steer_max: int = 30,
@@ -24,8 +26,7 @@ class MiniBullseyeControlCmd(Command):
         key_repeat_delay_ms: int = 80,
     ):
         super().__init__()
-        self.i2c_bus = int(i2c_bus)
-        self.esp32_addr = int(esp32_addr)
+        self.add_requirement(motor_control)
         self.speed_min = int(speed_min)
         self.speed_max = int(speed_max)
         self.steer_min = int(steer_min)
@@ -34,8 +35,11 @@ class MiniBullseyeControlCmd(Command):
         self.steer_step = int(steer_step)
         self.key_repeat_delay_ms = int(key_repeat_delay_ms)
 
-        self._bus = None
         self._running = False
+        
+        # Get reference to motor control subsystem
+        self.motor_control = motor_control
+        self.path_following = path_following
 
         # GUI objects
         self.root = None
@@ -48,13 +52,6 @@ class MiniBullseyeControlCmd(Command):
         self._repeat_job = None
 
     def initialize(self):
-        # Initialize I2C bus (optional for testing without hardware)
-        try:
-            self._bus = smbus2.SMBus(self.i2c_bus)
-        except Exception as e:
-            print(f"MiniBullseyeControlCmd: I2C initialization failed: {e}")
-            self._bus = None
-
         # Create GUI
         try:
             self.root = tk.Tk()
@@ -142,13 +139,6 @@ class MiniBullseyeControlCmd(Command):
                 pass
             self.root = None
 
-        if self._bus is not None:
-            try:
-                self._bus.close()
-            except Exception:
-                pass
-            self._bus = None
-
         if interrupted:
             print("MiniBullseyeControlCmd: interrupted")
 
@@ -165,21 +155,13 @@ class MiniBullseyeControlCmd(Command):
             self.root = None
 
     def _send_data(self, speed, angle):
-        speed = max(-32768, min(32767, int(speed)))
-        angle = max(-32768, min(32767, int(angle)))
-
-        data = [
-            (speed >> 8) & 0xFF, speed & 0xFF,
-            (angle >> 8) & 0xFF, angle & 0xFF,
-        ]
-
-        if self._bus:
-            try:
-                self._bus.write_i2c_block_data(self.esp32_addr, 0, data)
-            except Exception as e:
-                print(f"MiniBullseyeControlCmd: I2C write failed: {e}")
-
-        #print(f"Sent → speed: {speed:4d}   angle: {angle:4d}")
+        """Send speed and angle commands via MotorControl subsystem.
+        
+        Args:
+            speed: Speed percentage
+            angle: Steering angle in degrees
+        """
+        self.motor_control.set_speed_angle(speed, angle)
 
     def _update_and_send(self):
         if self.speed_slider is None or self.steering_slider is None:
@@ -204,6 +186,9 @@ class MiniBullseyeControlCmd(Command):
 
     def _on_key_press(self, event):
         key = event.keysym.lower()
+        if key == "o":
+            self._schedule_follow_path()
+            return
         if key in self.keys_pressed:
             self.keys_pressed[key] = True
             if self._repeat_job is not None and self.root is not None:
@@ -248,3 +233,8 @@ class MiniBullseyeControlCmd(Command):
 
         if any(self.keys_pressed.values()) and self.root is not None:
             self._repeat_job = self.root.after(self.key_repeat_delay_ms, self._repeat_action)
+
+    def _schedule_follow_path(self):
+        FollowPathCmd(self.motor_control, self.path_following).schedule()
+        if self.status_label is not None:
+            self.status_label.config(text="FollowPathCmd scheduled", fg="blue")

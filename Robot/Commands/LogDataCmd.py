@@ -14,7 +14,7 @@ from typing import Optional
 from Robot.subsystems.sensors.UWB import UWB
 from Robot.subsystems.sensors.UWBTag import Position
 from Robot.subsystems.sensors.IMU import IMU
-from Robot.subsystems.sensors.BackWheelEncoder import Encoder
+from Robot.subsystems.sensors.BackWheelEncoder import BackWheelEncoder
 from Robot.subsystems.KalmanStateEstimator import KalmanStateEstimator
 
 class LogDataCmd(Command):
@@ -187,7 +187,7 @@ class LogDataCmd(Command):
 
         # 4) Encoder data
         try:
-            encoder = Encoder()
+            encoder = BackWheelEncoder()
             # count = encoder.get_count()
             velocity = encoder.get_velocity()
             encoder_file = _make_log_filename('encoder_data')
