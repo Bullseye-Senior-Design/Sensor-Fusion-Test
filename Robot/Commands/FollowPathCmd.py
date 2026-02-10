@@ -6,8 +6,8 @@ from Robot.subsystems.KalmanStateEstimator import KalmanStateEstimator
 from Robot.subsystems.MotorControl import MotorControl
 import logging
 
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(f"{__name__}.FollowPathCmd")
+logger.setLevel(logging.DEBUG)  # Set to DEBUG for detailed output
 
 class FollowPathCmd(Command):
     """Command that uses MPCNavigator to follow a path.
@@ -54,11 +54,19 @@ class FollowPathCmd(Command):
         """Start path following."""
         # Set path and start navigation
         self.path_following.set_path(self.path_matrix)
+        
+        # Print start and target positions
+        start_pos = self.path_matrix[0]
+        target_pos = self.path_matrix[-1]
+        print(f"Path Following - Start Position: x={start_pos[0]:.3f}m, y={start_pos[1]:.3f}m, yaw={np.degrees(start_pos[2]):.1f}°")
+        print(f"Path Following - Target Position: x={target_pos[0]:.3f}m, y={target_pos[1]:.3f}m, yaw={np.degrees(target_pos[2]):.1f}°")
+        
         self.path_following.start_path_following()
         
         self._running = True
         self._last_update_time = time.time()
         logger.info("FollowPathCmd: Path following initialized")
+    
 
     def execute(self):
         """Poll navigation system and send motor commands."""
