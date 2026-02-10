@@ -4,7 +4,10 @@ import numpy as np
 from Robot.subsystems.PathFollowing import PathFollowing
 from Robot.subsystems.KalmanStateEstimator import KalmanStateEstimator
 from Robot.subsystems.MotorControl import MotorControl
+import logging
 
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 class FollowPathCmd(Command):
     """Command that uses MPCNavigator to follow a path.
@@ -55,7 +58,7 @@ class FollowPathCmd(Command):
         
         self._running = True
         self._last_update_time = time.time()
-        print("FollowPathCmd: Path following initialized")
+        logger.info("FollowPathCmd: Path following initialized")
 
     def execute(self):
         """Poll navigation system and send motor commands."""
@@ -75,9 +78,10 @@ class FollowPathCmd(Command):
             
             # Send to motors via MotorControl subsystem
             self.motor_control.set_speed_angle(speed_percent, angle_deg)
+            logger.debug(f"FollowPathCmd: v_cmd={v_cmd:.2f} m/s, delta_cmd={delta_cmd:.2f} rad -> speed={speed_percent}%, angle={angle_deg} deg")
             
         except Exception as e:
-            print(f"FollowPathCmd: Error in execute: {e}")
+            logger.error(f"FollowPathCmd: Error in execute: {e}")
 
     def end(self, interrupted):
         """Stop path following and clean up."""
