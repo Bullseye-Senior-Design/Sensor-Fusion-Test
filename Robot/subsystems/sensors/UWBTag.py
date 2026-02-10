@@ -251,7 +251,7 @@ class UWBTag:
     def get_latest_position(self) -> Optional[Position]:
         """Get the latest position reading"""
         with self.position_lock:
-            return self.tag_info.position
+            return self.last_position
 
     def get_latest_anchor_info(self) -> Optional[List[Dict[str, Any]]]:
         """Return the latest anchor information in a thread-safe way.
