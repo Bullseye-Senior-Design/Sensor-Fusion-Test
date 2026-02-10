@@ -3,8 +3,12 @@ import casadi as ca
 from scipy.interpolate import interp1d
 import time
 import threading
+import logging
 from Robot.subsystems.KalmanStateEstimator import KalmanStateEstimator
 from structure.Subsystem import Subsystem
+
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 
 class PathFollowing(Subsystem):
@@ -41,7 +45,7 @@ class PathFollowing(Subsystem):
                            [self.v_bounds[1], self.delta_bounds[1]] * self.p)
         
         # Setup MPC solver
-        self.solver, self.n_states, self.n_controls = self._setup_mpc()r
+        self.solver, self.n_states, self.n_controls = self._setup_mpc()
         
         # Constraint bounds (g=0 for initial state and dynamics)
         self.lbg = np.zeros((self.p + 1) * self.n_states)
@@ -183,17 +187,17 @@ class PathFollowing(Subsystem):
         """Start the MPC path following in a separate thread."""
         with self._lock:
             if self._running:
-                print("Path following already running")
+                logger.debug("Path following already running")
                 return
             
             if self.path_matrix is None:
-                print("Error: No path set. Call set_path() first.")
+                logger.error("No path set. Call set_path() first.")
                 return
             
             self._running = True
             self._thread = threading.Thread(target=self._control_loop, daemon=True)
             self._thread.start()
-            print("MPC path following started")
+            logger.info("MPC path following started")
     
     def stop_path_following(self):
         """Stop the MPC path following."""
@@ -202,7 +206,7 @@ class PathFollowing(Subsystem):
                 return
             
             self._running = False
-            print("MPC path following stopped")
+            logger.info("MPC path following stopped")
         
         if self._thread is not None:
             self._thread.join(timeout=2.0)
@@ -223,7 +227,7 @@ class PathFollowing(Subsystem):
     
     def _control_loop(self):
         """Main control loop running in separate thread."""
-        print("MPC control loop started")
+        logger.info("MPC control loop started")
         next_time = time.time()
         
         while True:
@@ -273,11 +277,17 @@ class PathFollowing(Subsystem):
                     self._x_prev = res['x']
                 
                 elapsed = time.time() - start_time
-                print(f"MPC: V={v_cmd:.2f} m/s | δ={np.degrees(delta_cmd):.1f}° | "
-                      f"Pos=({cur_state[0]:.2f}, {cur_state[1]:.2f}) | Time={elapsed:.3f}s")
+                logger.debug(
+                    "MPC: V=%.2f m/s | δ=%.1f° | Pos=(%.2f, %.2f) | Time=%.3fs",
+                    v_cmd,
+                    np.degrees(delta_cmd),
+                    cur_state[0],
+                    cur_state[1],
+                    elapsed,
+                )
                 
-            except Exception as e:
-                print(f"MPC error: {e}")
+            except Exception:
+                logger.exception("MPC error")
                 with self._lock:
                     self._v_cmd = 0.0
                     self._delta_cmd = 0.0
@@ -287,4 +297,4 @@ class PathFollowing(Subsystem):
             if sleep_duration > 0:
                 time.sleep(sleep_duration)
         
-        print("MPC control loop stopped")
+        logger.info("MPC control loop stopped")
