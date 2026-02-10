@@ -58,8 +58,8 @@ class FollowPathCmd(Command):
         # Print start and target positions
         start_pos = self.path_matrix[0]
         target_pos = self.path_matrix[-1]
-        print(f"Path Following - Start Position: x={start_pos[0]:.3f}m, y={start_pos[1]:.3f}m, yaw={np.degrees(start_pos[2]):.1f}°")
-        print(f"Path Following - Target Position: x={target_pos[0]:.3f}m, y={target_pos[1]:.3f}m, yaw={np.degrees(target_pos[2]):.1f}°")
+        logger.info(f"Path Following - Start Position: x={start_pos[0]:.3f}m, y={start_pos[1]:.3f}m, yaw={np.degrees(start_pos[2]):.1f}°")
+        logger.info(f"Path Following - Target Position: x={target_pos[0]:.3f}m, y={target_pos[1]:.3f}m, yaw={np.degrees(target_pos[2]):.1f}°")
         
         self.path_following.start_path_following()
         
@@ -85,7 +85,6 @@ class FollowPathCmd(Command):
             angle_deg = int(np.degrees(delta_cmd))
             
             logger.debug(f"FollowPathCmd: v_cmd={v_cmd:.2f} m/s, delta_cmd={delta_cmd:.2f} rad -> speed={speed_percent}%, angle={angle_deg} deg")
-            print(f"FollowPathCmd: v_cmd={v_cmd:.2f} m/s, delta_cmd={delta_cmd:.2f} rad -> speed={speed_percent}%, angle={angle_deg} deg")
             
             # Send to motors via MotorControl subsystem
             self.motor_control.set_speed_angle(speed_percent, angle_deg)
