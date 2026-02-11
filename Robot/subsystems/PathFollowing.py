@@ -26,8 +26,8 @@ class PathFollowing(Subsystem):
         # ────────────────────────────────────────────────
         self.Ts = 0.1
         self.p = 12
-        self.L = 0.24765
-        self.v_nom = Constants.motor_top_speed / 2
+        self.L = 0.25
+        self.v_nom = Constants.motor_top_speed
         self.ds = self.v_nom * self.Ts
         
         # Weights (Q for state, R for input, Rd for rate of change)
