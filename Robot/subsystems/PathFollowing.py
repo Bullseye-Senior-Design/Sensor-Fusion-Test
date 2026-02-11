@@ -8,8 +8,8 @@ from Robot.subsystems.KalmanStateEstimator import KalmanStateEstimator
 from structure.Subsystem import Subsystem
 from Robot.Constants import Constants
 
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(f"{__name__}.PathFollowing")
+logger.setLevel(logging.DEBUG)
 
 
 class PathFollowing(Subsystem):
@@ -27,7 +27,7 @@ class PathFollowing(Subsystem):
         self.Ts = 0.1
         self.p = 12
         self.L = 0.25
-        self.v_nom = Constants.motor_top_speed
+        self.v_nom = Constants.rear_motor_top_speed / 2.0
         self.ds = self.v_nom * self.Ts
         
         # Weights (Q for state, R for input, Rd for rate of change)
@@ -36,7 +36,7 @@ class PathFollowing(Subsystem):
         self.Rd_diag = np.array([1.0, 5.0])
         
         # Constraints
-        self.v_bounds = [-Constants.motor_top_speed, Constants.motor_top_speed]
+        self.v_bounds = [-Constants.rear_motor_top_speed, Constants.rear_motor_top_speed]
         self.delta_bounds = [-np.deg2rad(30), np.deg2rad(30)]
         
         # State bounds

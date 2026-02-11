@@ -77,7 +77,7 @@ class FollowPathCmd(Command):
             # Convert to motor commands
             # v_cmd is in m/s, delta_cmd is in radians
             # Convert velocity to percentage (assuming 1 m/s = 100%)
-            speed_percent = int((v_cmd / Constants.motor_top_speed) * 100.0)
+            speed_percent = int((v_cmd / Constants.rear_motor_top_speed) * 100.0)
             # Convert steering angle from radians to degrees
             angle_deg = int(np.degrees(delta_cmd))
             

@@ -1,6 +1,5 @@
 from structure.commands.Command import Command
 
-
 import csv
 import os
 import time
@@ -9,6 +8,7 @@ import numpy as np
 from types import SimpleNamespace
 from pathlib import Path
 from typing import Optional
+import shutil
 
 # subsystems
 from Robot.subsystems.sensors.UWB import UWB
@@ -16,12 +16,50 @@ from Robot.subsystems.sensors.UWBTag import Position
 from Robot.subsystems.sensors.IMU import IMU
 from Robot.subsystems.sensors.BackWheelEncoder import BackWheelEncoder
 from Robot.subsystems.KalmanStateEstimator import KalmanStateEstimator
+from Robot.subsystems.PathFollowing import PathFollowing
 
 class LogDataCmd(Command):
     def __init__(self):
         super().__init__()
+    
+    def _delete_old_folders(self, base_dir, max_age_days=7):
+        """Delete folders in base_dir that are older than max_age_days.
+        
+        Assumes folder names follow YYYYMMDD_HHMMSS format.
+        """
+        try:
+            base_path = Path(base_dir)
+            if not base_path.exists():
+                return
+            
+            current_time = time.time()
+            max_age_seconds = max_age_days * 24 * 60 * 60
+            
+            for folder in base_path.iterdir():
+                if not folder.is_dir():
+                    continue
+                
+                folder_name = folder.name
+                # Try to parse the folder name as a timestamp
+                try:
+                    # Expected format: YYYYMMDD_HHMMSS
+                    if len(folder_name) >= 15 and folder_name[8] == '_':
+                        folder_time = time.mktime(time.strptime(folder_name[:15], '%Y%m%d_%H%M%S'))
+                        age_seconds = current_time - folder_time
+                        
+                        if age_seconds > max_age_seconds:
+                            print(f"Deleting old folder: {folder}")
+                            shutil.rmtree(folder)
+                except (ValueError, OSError) as e:
+                    # Skip folders that can't be parsed or deleted
+                    continue
+        except Exception as e:
+            print(f"Error cleaning old folders from {base_dir}: {e}")
         
     def initialize(self):
+        # Clean up old log folders (older than 1 week)
+        self._delete_old_folders(Path.cwd() / 'logs', max_age_days=7)
+        
         # record when logging begins and create a timestamped folder to hold all logs
         self.begin_timestamp = time.time()
         ts_str = time.strftime('%Y%m%d_%H%M%S', time.localtime(self.begin_timestamp))
@@ -41,6 +79,7 @@ class LogDataCmd(Command):
             self.imu_file_path = str(self.log_dir / 'imu_orientation.csv')
             self.cov_file_path = str(self.log_dir / 'ekf_covariance.txt')
             self.encoder_file_path = str(self.log_dir / 'encoder_data.csv')
+            self.path_following_file_path = str(self.log_dir / 'path_following.csv')
 
             # open UWB positions CSV
             self._uwb_fh = open(self.uwb_file_path, 'a', newline='')
@@ -81,6 +120,14 @@ class LogDataCmd(Command):
             self._encoder_writer = csv.DictWriter(self._encoder_fh, fieldnames=encoder_fieldnames)
             if encoder_new:
                 self._encoder_writer.writeheader()
+
+            # open path following CSV
+            self._path_following_fh = open(self.path_following_file_path, 'a', newline='')
+            path_new = os.path.getsize(self.path_following_file_path) == 0
+            path_fieldnames = ['timestamp', 'motor_speed_mps', 'steering_angle_rad', 'steering_angle_deg']
+            self._path_following_writer = csv.DictWriter(self._path_following_fh, fieldnames=path_fieldnames)
+            if path_new:
+                self._path_following_writer.writeheader()
 
             # open covariance text file handle for append
             self._cov_fh = open(self.cov_file_path, 'a')
@@ -194,6 +241,16 @@ class LogDataCmd(Command):
             # self.save_encoder_to_csv(count, velocity, encoder_file, timestamp=ts)
         except Exception as e:
             print(f"Encoder read error: {e}")
+
+        # 5) Path following data (motor speed and steering angle)
+        try:
+            path_follower = PathFollowing()
+            if path_follower.is_running():
+                v_cmd, delta_cmd = path_follower.get_current_commands()
+                path_file = _make_log_filename('path_following')
+                self.save_path_following_to_csv(v_cmd, delta_cmd, path_file, timestamp=ts)
+        except Exception as e:
+            print(f"Path following read error: {e}")
     
     def end(self, interrupted):
         # Close any persistent file handles opened in initialize
@@ -207,6 +264,8 @@ class LogDataCmd(Command):
             self._imu_fh.close()
         if hasattr(self, '_encoder_fh') and not self._encoder_fh.closed:
             self._encoder_fh.close()
+        if hasattr(self, '_path_following_fh') and not self._path_following_fh.closed:
+            self._path_following_fh.close()
         if hasattr(self, '_cov_fh') and not self._cov_fh.closed:
             self._cov_fh.close()
     
@@ -546,4 +605,53 @@ class LogDataCmd(Command):
             return True
         except Exception as e:
             print(f"Error saving encoder data to CSV: {e}")
+            return False
+
+    def save_path_following_to_csv(self, motor_speed: float, steering_angle: float, filename: str, timestamp: Optional[float] = None) -> bool:
+        """Save path following motor speed and steering angle to CSV file.
+        
+        Args:
+            motor_speed: Motor speed in m/s
+            steering_angle: Steering angle in radians
+            filename: CSV filename
+            timestamp: Optional timestamp
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            ts = timestamp if timestamp is not None else time.time()
+            steering_angle_deg = float(steering_angle) * 180.0 / np.pi
+
+            # Use persistent writer if available and filename matches
+            if hasattr(self, '_path_following_writer') and hasattr(self, 'path_following_file_path') and str(filename) == str(self.path_following_file_path):
+                self._path_following_writer.writerow({
+                    'timestamp': ts,
+                    'motor_speed_mps': motor_speed,
+                    'steering_angle_rad': steering_angle,
+                    'steering_angle_deg': steering_angle_deg,
+                })
+                try:
+                    self._path_following_fh.flush()
+                except Exception:
+                    pass
+                return True
+
+            # Fallback: open file each time (existing behavior)
+            filename = str(filename)
+            file_exists = os.path.exists(filename)
+            with open(filename, 'a', newline='') as csvfile:
+                fieldnames = ['timestamp', 'motor_speed_mps', 'steering_angle_rad', 'steering_angle_deg']
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                if not file_exists:
+                    writer.writeheader()
+                writer.writerow({
+                    'timestamp': ts,
+                    'motor_speed_mps': motor_speed,
+                    'steering_angle_rad': steering_angle,
+                    'steering_angle_deg': steering_angle_deg,
+                })
+            return True
+        except Exception as e:
+            print(f"Error saving path following data to CSV: {e}")
             return False
