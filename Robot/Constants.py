@@ -9,6 +9,9 @@ class Constants:
     wheel_circumference = 0.25  # meters
     counts_per_revolution = 6  # encoder pulses per wheel rotation
     
+    # Motor speed constants
+    motor_top_speed = 0.13
+    
     # Clutches Constants
     left_clutch_pin = 17
     right_clutch_pin = 27

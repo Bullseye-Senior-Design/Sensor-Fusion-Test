@@ -5,6 +5,7 @@ from Robot.subsystems.PathFollowing import PathFollowing
 from Robot.subsystems.KalmanStateEstimator import KalmanStateEstimator
 from Robot.subsystems.MotorControl import MotorControl
 import logging
+from Robot.Constants import Constants
 
 logger = logging.getLogger(f"{__name__}.FollowPathCmd")
 logger.setLevel(logging.INFO)  # Set to DEBUG for detailed output
@@ -39,7 +40,7 @@ class FollowPathCmd(Command):
         start_yaw = state_estimator.euler[2]
         
         # Create a simple straight path: 0.5 meters forward from current position
-        distance = 0.5  # meters
+        distance = 1  # meters
         num_points = 100
         self.path_matrix = np.zeros((num_points, 3))
         # Path goes forward in the direction of current yaw
@@ -76,7 +77,7 @@ class FollowPathCmd(Command):
             # Convert to motor commands
             # v_cmd is in m/s, delta_cmd is in radians
             # Convert velocity to percentage (assuming 1 m/s = 100%)
-            speed_percent = int(v_cmd * 100.0)
+            speed_percent = int((v_cmd / Constants.motor_top_speed) * 100.0)
             # Convert steering angle from radians to degrees
             angle_deg = int(np.degrees(delta_cmd))
             
