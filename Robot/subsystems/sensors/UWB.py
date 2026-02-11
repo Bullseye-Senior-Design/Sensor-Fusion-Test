@@ -168,7 +168,7 @@ class UWB:
         results: List[Tuple[str, Optional[List[Dict[str, Any]]]]] = []
         for tag in self.tags:
             try:
-                anchors = tag.get_latest_anchor_info()
+                continue  # skip for now since we don't use this anywhere
             except Exception:
                 logger.exception(f"Error reading anchors from {tag.port}")
                 anchors = None
