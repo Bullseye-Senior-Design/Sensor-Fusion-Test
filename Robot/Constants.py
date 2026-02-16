@@ -10,7 +10,7 @@ class Constants:
     counts_per_revolution = 6  # encoder pulses per wheel rotation
     
     # Motor speed constants
-    motor_top_speed = 0.13
+    rear_motor_top_speed = 0.13
     
     # Clutches Constants
     left_clutch_pin = 17

@@ -2,6 +2,9 @@
 
 import smbus2
 from structure.Subsystem import Subsystem
+from Robot.subsystems.KalmanStateEstimator import KalmanStateEstimator
+from Robot.Constants import Constants
+import math
 
 
 class MotorControl(Subsystem):
@@ -32,6 +35,7 @@ class MotorControl(Subsystem):
         
         # Initialize I2C bus
         self._init_i2c()
+        self.state_estimator = KalmanStateEstimator()
     
     def _init_i2c(self):
         """Initialize I2C bus connection."""
@@ -49,6 +53,9 @@ class MotorControl(Subsystem):
             speed: Speed percentage (-100 to 100)
             angle: Steering angle in degrees (-30 to 30)
         """
+        self.state_estimator.set_steering_angle(math.radians(angle))
+        self.state_estimator.set_rear_wheel_velocity(speed / 100.0 * Constants.rear_motor_top_speed)
+        
         # Clamp to int16 range
         speed = max(-32768, min(32767, int(speed)))
         angle = max(-32768, min(32767, int(angle)))
