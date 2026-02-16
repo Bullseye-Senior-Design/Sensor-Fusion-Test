@@ -382,6 +382,10 @@ class PathFollowing(Subsystem):
                 # Check solver status (safely handle missing keys)
                 solver_stats = res.get('stats', {})
                 solver_status = solver_stats.get('return_status', None)
+                try:
+                    logger.debug(f"res: {res}")
+                except Exception:
+                    logger.debug("res: <unprintable result>")
                 # Only warn on actual known failure statuses, not when stats are missing
                 known_failures = ['Search_Direction_Becomes_Too_Small', 'Diverging_Iterates', 
                                  'Maximum_Iterations_Exceeded', 'Restoration_Failed',
