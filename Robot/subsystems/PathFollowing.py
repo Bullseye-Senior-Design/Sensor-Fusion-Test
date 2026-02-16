@@ -187,6 +187,15 @@ class PathFollowing(Subsystem):
         with self._lock:
             self.path_matrix = np.asarray(path_matrix, dtype=float)
     
+    def get_path(self):
+        """Get the current reference path.
+        
+        Returns:
+            Nx3 numpy array of [x, y, theta] waypoints, or None if no path set
+        """
+        with self._lock:
+            return self.path_matrix.copy() if self.path_matrix is not None else None
+    
     def start_path_following(self):
         """Start the MPC path following in a separate thread."""
         with self._lock:
