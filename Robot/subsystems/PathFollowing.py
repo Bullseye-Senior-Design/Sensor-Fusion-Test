@@ -272,6 +272,7 @@ class PathFollowing(Subsystem):
                 return
             
             self._running = False
+            logger.debug(f"Stopping path following thread - running={self._running}")
             logger.info("MPC path following stopped")
         
         if self._thread is not None:
