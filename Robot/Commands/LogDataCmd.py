@@ -157,7 +157,6 @@ class LogDataCmd(Command):
         # self.save_encoder_to_csv(count, velocity, self.encoder_file_path, timestamp=ts)
 
         # 5) Path following data (motor speed and steering angle)
-        print(f"Path follower running: {self.path_following.is_running()}")
         if self.path_following.is_running():
             v_cmd, delta_cmd = self.path_following.get_current_commands()
             self.save_path_following_to_csv(v_cmd, delta_cmd, self.path_following_file_path, timestamp=ts)
