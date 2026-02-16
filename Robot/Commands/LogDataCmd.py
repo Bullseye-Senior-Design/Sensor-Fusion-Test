@@ -30,8 +30,9 @@ class LogDataCmd(Command):
     ENCODER_FIELDNAMES = ['timestamp', 'count', 'velocity']
     PATH_FOLLOWING_FIELDNAMES = ['timestamp', 'motor_speed_mps', 'steering_angle_rad', 'steering_angle_deg']
     
-    def __init__(self):
+    def __init__(self, path_following: PathFollowing):
         super().__init__()
+        self.path_following = path_following
         self.csv_manager = CSVFileManager()
     
     def _delete_old_folders(self, base_dir, max_age_days=7):
@@ -156,9 +157,9 @@ class LogDataCmd(Command):
         # self.save_encoder_to_csv(count, velocity, self.encoder_file_path, timestamp=ts)
 
         # 5) Path following data (motor speed and steering angle)
-        path_follower = PathFollowing()
-        if path_follower.is_running():
-            v_cmd, delta_cmd = path_follower.get_current_commands()
+        print(f"Path follower running: {self.path_following.is_running()}")
+        if self.path_following.is_running():
+            v_cmd, delta_cmd = self.path_following.get_current_commands()
             self.save_path_following_to_csv(v_cmd, delta_cmd, self.path_following_file_path, timestamp=ts)
     
     def end(self, interrupted):
