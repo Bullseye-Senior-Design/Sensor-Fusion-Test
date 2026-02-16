@@ -8,6 +8,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import numpy as np
 from matplotlib import patches
 from matplotlib import transforms as mtransforms
+import logging
 
 from Robot.subsystems.KalmanStateEstimator import KalmanStateEstimator
 from Robot.subsystems.sensors.IMU import IMU
@@ -16,6 +17,8 @@ from Robot.subsystems.PathFollowing import PathFollowing
 from Robot.MathUtil import MathUtil
 import time
 
+logger = logging.getLogger(f"{__name__}.PlotStateCmd")
+logger.setLevel(logging.DEBUG) 
 
 class PlotStateCmd(Command):
     """Command that plots the EKF position (x,y) in a Matplotlib figure embedded
@@ -249,8 +252,8 @@ class PlotStateCmd(Command):
             # update uwb_dots data
             self.uwb_dots.set_data(self.uwb_xs, self.uwb_ys) # type: ignore
         
-        # ADDED: update reference path from PathFollowing subsystem
         ref_path = self.path_following.get_path()
+        logger.debug(f"PlotStateCmd: got reference path with shape {ref_path.shape if ref_path is not None else 'None'}")
         if ref_path is not None and len(ref_path) > 0:
             # Extract x and y coordinates from the path matrix
             ref_xs = ref_path[:, 0]

@@ -9,7 +9,7 @@ from structure.Subsystem import Subsystem
 from Robot.Constants import Constants
 
 logger = logging.getLogger(f"{__name__}.PathFollowing")
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 
 
 class PathFollowing(Subsystem):
