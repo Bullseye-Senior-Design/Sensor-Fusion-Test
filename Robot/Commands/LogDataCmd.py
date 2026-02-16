@@ -109,10 +109,6 @@ class LogDataCmd(Command):
         """
         ts = time.time()
 
-        # helper to create filenames inside the command's timestamped folder
-        def _make_log_filename(base: str, ext: str = 'csv') -> str:
-            return str(self.log_dir / f"{base}.{ext}")
-
         # 1) UWB positions
         uwb = UWB()
         positions = uwb.get_positions() or []
@@ -120,13 +116,11 @@ class LogDataCmd(Command):
         # take up to two positions (older code expected two)
         p1 = positions[0] if len(positions) > 0 else None
         p2 = positions[1] if len(positions) > 1 else None
-        uwb_file = _make_log_filename('uwb_positions', 'csv')
-        self.save_uwb_pos_to_csv(p1, p2, uwb_file, timestamp=ts)
+        self.save_uwb_pos_to_csv(p1, p2, self.uwb_file_path, timestamp=ts)
 
         # Also record anchor information (text file) for debugging / reference
         anchors = uwb.get_latest_anchor_info()
-        anchor_file = _make_log_filename('uwb_anchors', 'csv')
-        self.save_uwb_anchors_to_csv(anchors, anchor_file, timestamp=ts)
+        self.save_uwb_anchors_to_csv(anchors, self.anchors_file_path, timestamp=ts)
 
         # 2) State estimator (only log if initialized)
         kf = KalmanStateEstimator()
@@ -138,11 +132,9 @@ class LogDataCmd(Command):
             yaw = float(euler[2]) * 180.0 / 3.141592653589793
             pitch = float(euler[1]) * 180.0 / 3.141592653589793
             roll = float(euler[0]) * 180.0 / 3.141592653589793
-            state_file = _make_log_filename('state_estimator')
-            self.save_state_to_csv(state, yaw, pitch, roll, state_file, timestamp=ts)
+            self.save_state_to_csv(state, yaw, pitch, roll, self.state_file_path, timestamp=ts)
             # Also log covariance matrix (EKF P)
-            cov_file = _make_log_filename('ekf_covariance', 'txt')
-            self.save_covariance_to_txt(kf.P, cov_file, timestamp=ts)
+            self.save_covariance_to_txt(kf.P, self.cov_file_path, timestamp=ts)
 
         # 3) IMU orientation
         imu = IMU()
@@ -154,23 +146,20 @@ class LogDataCmd(Command):
         mag = imu.get_mag()
 
         orient = SimpleNamespace(timestamp=ts, yaw=heading, pitch=pitch, roll=roll, accel=accel, gyro=gyro, mag=mag)
-        imu_file = _make_log_filename('imu_orientation')
         # save orientation and raw sensor values
-        self.save_orientation_to_csv(orient, imu_file)
+        self.save_orientation_to_csv(orient, self.imu_file_path)
 
         # 4) Encoder data
         encoder = BackWheelEncoder()
         # count = encoder.get_count()
         velocity = encoder.get_velocity()
-        encoder_file = _make_log_filename('encoder_data')
-        # self.save_encoder_to_csv(count, velocity, encoder_file, timestamp=ts)
+        # self.save_encoder_to_csv(count, velocity, self.encoder_file_path, timestamp=ts)
 
         # 5) Path following data (motor speed and steering angle)
         path_follower = PathFollowing()
         if path_follower.is_running():
             v_cmd, delta_cmd = path_follower.get_current_commands()
-            path_file = _make_log_filename('path_following')
-            self.save_path_following_to_csv(v_cmd, delta_cmd, path_file, timestamp=ts)
+            self.save_path_following_to_csv(v_cmd, delta_cmd, self.path_following_file_path, timestamp=ts)
     
     def end(self, interrupted):
         # Close all CSV files managed by the manager
