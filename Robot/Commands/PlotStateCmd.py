@@ -21,7 +21,7 @@ from Robot.MathUtil import MathUtil
 import time
 
 logger = logging.getLogger(f"{__name__}.PlotStateCmd")
-logger.setLevel(logging.DEBUG) 
+logger.setLevel(logging.INFO) 
 
 class PlotStateCmd(Command):
     """Command that plots the EKF position (x,y) in a Matplotlib figure embedded
