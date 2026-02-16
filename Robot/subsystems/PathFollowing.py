@@ -381,11 +381,16 @@ class PathFollowing(Subsystem):
                 
                 # Check solver status (safely handle missing keys)
                 solver_stats = res.get('stats', {})
-                solver_status = solver_stats.get('return_status', 'Unknown')
-                if solver_status not in ['Solve_Succeeded', 'Solved_To_Acceptable_Level']:
+                solver_status = solver_stats.get('return_status', None)
+                # Only warn on actual known failure statuses, not when stats are missing
+                known_failures = ['Search_Direction_Becomes_Too_Small', 'Diverging_Iterates', 
+                                 'Maximum_Iterations_Exceeded', 'Restoration_Failed',
+                                 'Error_In_Step_Computation', 'Not_Enough_Degrees_Of_Freedom',
+                                 'Invalid_Problem_Definition', 'Invalid_Option', 'Unrecoverable_Exception']
+                if solver_status in known_failures:
                     cost = float(res.get('f', 'N/A'))
                     logger.warning(
-                        f"MPC solver did not converge: {solver_status}. "
+                        f"MPC solver failed: {solver_status}. "
                         f"Cost: {cost}. Using last solution."
                     )
                 
