@@ -9,7 +9,7 @@ from structure.Subsystem import Subsystem
 from Robot.Constants import Constants
 
 logger = logging.getLogger(f"{__name__}.PathFollowing")
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 
 
 class PathFollowing(Subsystem):
@@ -19,7 +19,16 @@ class PathFollowing(Subsystem):
     continuous path following using feedback from the KalmanStateEstimator.
     """
     
-    def __init__(self):
+    _instance = None
+
+    def __new__(cls):
+        """Singleton pattern: return the same instance every time."""
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            cls._instance.start()
+        return cls._instance
+    
+    def start(self):
         """Initialize MPC Navigator with default parameters."""
         # ────────────────────────────────────────────────
         # Parameters & Constants
@@ -247,6 +256,15 @@ class PathFollowing(Subsystem):
         with self._lock:
             self.V_weight = weight
             logger.debug(f"Set speed tracking weight: {weight}")
+    
+    def get_path(self):
+        """Get the current reference path.
+        
+        Returns:
+            Nx3 numpy array of [x, y, theta] waypoints, or None if no path set
+        """
+        with self._lock:
+            return self.path_matrix.copy() if self.path_matrix is not None else None
     
     def start_path_following(self):
         """Start the MPC path following in a separate thread."""

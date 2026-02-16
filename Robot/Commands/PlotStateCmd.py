@@ -3,18 +3,25 @@ from structure.commands.Command import Command
 
 import tkinter as tk
 
+import matplotlib
+matplotlib.use('TkAgg')
+
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import numpy as np
 from matplotlib import patches
 from matplotlib import transforms as mtransforms
+import logging
 
 from Robot.subsystems.KalmanStateEstimator import KalmanStateEstimator
 from Robot.subsystems.sensors.IMU import IMU
-from Robot.subsystems.sensors.UWB import UWB 
+from Robot.subsystems.sensors.UWB import UWB
+from Robot.subsystems.PathFollowing import PathFollowing
 from Robot.MathUtil import MathUtil
 import time
 
+logger = logging.getLogger(f"{__name__}.PlotStateCmd")
+logger.setLevel(logging.DEBUG) 
 
 class PlotStateCmd(Command):
     """Command that plots the EKF position (x,y) in a Matplotlib figure embedded
@@ -56,6 +63,7 @@ class PlotStateCmd(Command):
         self.estimator = KalmanStateEstimator()
         self.imu = IMU()
         self.uwb = UWB()   # <-- ADDED: singleton UWB interface
+        self.path_following = PathFollowing()  # <-- ADDED: singleton PathFollowing interface
 
     def initialize(self):
         # Create Tk window and Matplotlib canvas. We do NOT call mainloop;
@@ -91,7 +99,10 @@ class PlotStateCmd(Command):
         self.last_dot, = self.ax.plot([], [], "go", markersize=8, zorder=5)
 
         # UWB dots: red markers only (no connecting line)
-        self.uwb_dots, = self.ax.plot([], [], "ro", markersize=5, linestyle="") 
+        self.uwb_dots, = self.ax.plot([], [], "ro", markersize=5, linestyle="")
+        
+        # Reference path: black line
+        self.ref_path_line, = self.ax.plot([], [], "k-", linewidth=2, label="Reference Path")
 
         # top-down yaw view on right
         self.ax_top = self.figure.add_subplot(gs[0, 1])
@@ -243,6 +254,14 @@ class PlotStateCmd(Command):
                 self.uwb_ys = self.uwb_ys[-self.max_points :]
             # update uwb_dots data
             self.uwb_dots.set_data(self.uwb_xs, self.uwb_ys) # type: ignore
+        
+        ref_path = self.path_following.get_path()
+        logger.debug(f"PlotStateCmd: got reference path with shape {ref_path.shape if ref_path is not None else 'None'}")
+        if ref_path is not None and len(ref_path) > 0:
+            # Extract x and y coordinates from the path matrix
+            ref_xs = ref_path[:, 0]
+            ref_ys = ref_path[:, 1]
+            self.ref_path_line.set_data(ref_xs, ref_ys)  # type: ignore
 
     def end(self, interrupted):
         # close window and cleanup
