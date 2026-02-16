@@ -34,7 +34,7 @@ class RobotContainer:
         # self.path_following.default_command(FollowPathCmd(self.motor_control, self.path_following))
                     
     def begin_data_log(self):
-        LogDataCmd().schedule()
+        LogDataCmd(self.path_following).schedule()
         # PlotStateCmd().schedule()
         ZeroIMUCmd().schedule()
         
