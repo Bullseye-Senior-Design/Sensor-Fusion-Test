@@ -181,7 +181,16 @@ class PathFollowing(Subsystem):
         interp_theta = interp1d(s_wp, theta_wp, kind='cubic', fill_value='extrapolate')
         
         distances = np.sqrt((x_wp - cur_state[0])**2 + (y_wp - cur_state[1])**2)
-        s_cur = s_wp[np.argmin(distances)]
+        closest_idx = np.argmin(distances)
+        
+        # Interpolate arc-length at robot's position for better accuracy
+        if closest_idx == len(x_wp) - 1:
+            s_cur = s_wp[-1]
+        else:
+            # Linear interpolation between two closest waypoints
+            sum_distances = distances[closest_idx] + distances[closest_idx + 1]
+            alpha = distances[closest_idx] / sum_distances if sum_distances > 0 else 0
+            s_cur = s_wp[closest_idx] * (1 - alpha) + s_wp[closest_idx + 1] * alpha
         
         # Fixed arc-length spacing (independent of speed changes)
         ref = np.zeros((self.p + 1, 3))
