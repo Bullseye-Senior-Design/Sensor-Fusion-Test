@@ -379,12 +379,14 @@ class PathFollowing(Subsystem):
                 
                 res = self.solver(**solver_args)
                 
-                # Check solver status
-                solver_status = res['stats']['return_status']
+                # Check solver status (safely handle missing keys)
+                solver_stats = res.get('stats', {})
+                solver_status = solver_stats.get('return_status', 'Unknown')
                 if solver_status not in ['Solve_Succeeded', 'Solved_To_Acceptable_Level']:
+                    cost = float(res.get('f', 'N/A'))
                     logger.warning(
                         f"MPC solver did not converge: {solver_status}. "
-                        f"Cost: {float(res['f'])}. Using last solution."
+                        f"Cost: {cost}. Using last solution."
                     )
                 
                 # Extract control commands
