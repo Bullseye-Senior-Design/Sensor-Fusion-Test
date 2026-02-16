@@ -379,25 +379,6 @@ class PathFollowing(Subsystem):
                 
                 res = self.solver(**solver_args)
                 
-                # Check solver status (safely handle missing keys)
-                solver_stats = res.get('stats', {})
-                solver_status = solver_stats.get('return_status', None)
-                try:
-                    logger.debug(f"res: {res}")
-                except Exception:
-                    logger.debug("res: <unprintable result>")
-                # Only warn on actual known failure statuses, not when stats are missing
-                known_failures = ['Search_Direction_Becomes_Too_Small', 'Diverging_Iterates', 
-                                 'Maximum_Iterations_Exceeded', 'Restoration_Failed',
-                                 'Error_In_Step_Computation', 'Not_Enough_Degrees_Of_Freedom',
-                                 'Invalid_Problem_Definition', 'Invalid_Option', 'Unrecoverable_Exception']
-                if solver_status in known_failures:
-                    cost = float(res.get('f', 'N/A'))
-                    logger.warning(
-                        f"MPC solver failed: {solver_status}. "
-                        f"Cost: {cost}. Using last solution."
-                    )
-                
                 # Extract control commands
                 u_offset = self.n_states * (self.p + 1)
                 u_opt = res['x'][u_offset : u_offset + self.n_controls]
