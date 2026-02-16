@@ -211,7 +211,8 @@ class LogDataCmd(Command):
             'quality2': _safe_get(position2, 'quality', ''),
         }
         
-        writer, fh = self.csv_manager.files.get(str(filename), (None, None)) if str(filename) in self.csv_manager.files else (None, None)
+        # Try to get the file handle and writer from the manager; if not available, fallback to opening the file each time
+        fh, writer, _ = self.csv_manager.files.get(str(filename), (None, None, None))
         return write_csv_or_fallback(writer, fh, filename, self.UWB_FIELDNAMES, row)
     
     def save_orientation_to_csv(self, orientation, filename: str) -> bool:
@@ -253,7 +254,7 @@ class LogDataCmd(Command):
             'mz': mz,
         }
         
-        writer, fh = self.csv_manager.files.get(str(filename), (None, None)) if str(filename) in self.csv_manager.files else (None, None)
+        fh, writer, _ = self.csv_manager.files.get(str(filename), (None, None, None)) if str(filename) in self.csv_manager.files else (None, None, None)
         return write_csv_or_fallback(writer, fh, filename, self.IMU_FIELDNAMES, row)
 
     def save_uwb_anchors_to_csv(self, anchors_info, filename: str, timestamp: Optional[float] = None) -> bool:
@@ -282,7 +283,7 @@ class LogDataCmd(Command):
                         'z': pos[2] if pos and len(pos) > 2 else '',
                         'range': anchor.get('range', ''),
                     }
-                    writer, fh = self.csv_manager.files.get(str(filename), (None, None)) if str(filename) in self.csv_manager.files else (None, None)
+                    fh, writer, _ = self.csv_manager.files.get(str(filename), (None, None, None)) if str(filename) in self.csv_manager.files else (None, None, None)
                     write_csv_or_fallback(writer, fh, filename, self.ANCHORS_FIELDNAMES, row)
         return True
 
@@ -305,7 +306,7 @@ class LogDataCmd(Command):
             'roll': roll,
         }
         
-        writer, fh = self.csv_manager.files.get(str(filename), (None, None)) if str(filename) in self.csv_manager.files else (None, None)
+        fh, writer, _ = self.csv_manager.files.get(str(filename), (None, None, None)) if str(filename) in self.csv_manager.files else (None, None, None)
         return write_csv_or_fallback(writer, fh, filename, self.STATE_FIELDNAMES, row)
 
     def save_covariance_to_txt(self, P, filename: str, timestamp: Optional[float] = None) -> bool:
@@ -358,7 +359,7 @@ class LogDataCmd(Command):
             'velocity': velocity,
         }
         
-        writer, fh = self.csv_manager.files.get(str(filename), (None, None)) if str(filename) in self.csv_manager.files else (None, None)
+        fh, writer, _ = self.csv_manager.files.get(str(filename), (None, None, None)) if str(filename) in self.csv_manager.files else (None, None, None)
         return write_csv_or_fallback(writer, fh, filename, self.ENCODER_FIELDNAMES, row)
 
     def save_path_following_to_csv(self, motor_speed: float, steering_angle: float, filename: str, timestamp: Optional[float] = None) -> bool:
@@ -383,5 +384,5 @@ class LogDataCmd(Command):
             'steering_angle_deg': steering_angle_deg,
         }
         
-        writer, fh = self.csv_manager.files.get(str(filename), (None, None)) if str(filename) in self.csv_manager.files else (None, None)
+        fh, writer, _ = self.csv_manager.files.get(str(filename), (None, None, None)) if str(filename) in self.csv_manager.files else (None, None, None)
         return write_csv_or_fallback(writer, fh, filename, self.PATH_FOLLOWING_FIELDNAMES, row)
