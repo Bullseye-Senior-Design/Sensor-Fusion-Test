@@ -19,7 +19,16 @@ class PathFollowing(Subsystem):
     continuous path following using feedback from the KalmanStateEstimator.
     """
     
-    def __init__(self):
+    _instance = None
+
+    def __new__(cls):
+        """Singleton pattern: return the same instance every time."""
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            cls._instance.start()
+        return cls._instance
+    
+    def start(self):
         """Initialize MPC Navigator with default parameters."""
         # ────────────────────────────────────────────────
         # Parameters & Constants
