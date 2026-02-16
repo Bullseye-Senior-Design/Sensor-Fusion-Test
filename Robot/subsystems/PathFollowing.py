@@ -29,11 +29,13 @@ class PathFollowing(Subsystem):
         self.L = 0.25
         self.v_nom = Constants.rear_motor_top_speed / 2.0
         self.ds = self.v_nom * self.Ts
+        self.ds_ref = 0.1  # Fixed arc-length spacing for reference trajectory (10 cm per MPC step)
         
-        # Weights (Q for state, R for input, Rd for rate of change)
+        # Weights (Q for state, R for input, Rd for rate of change, V for speed tracking)
         self.Q_diag = np.array([10.0, 10.0, 1.0])
         self.R_diag = np.array([0.1, 0.1])
         self.Rd_diag = np.array([1.0, 5.0])
+        self.V_weight = 5.0  # Weight for speed tracking cost
         
         # Constraints
         self.v_bounds = [-Constants.rear_motor_top_speed, Constants.rear_motor_top_speed]
@@ -96,7 +98,8 @@ class PathFollowing(Subsystem):
         # Optimization variables
         U = ca.SX.sym('U', n_controls, self.p)
         X = ca.SX.sym('X', n_states, self.p + 1)
-        P = ca.SX.sym('P', n_states + n_controls + (self.p+1)*3)
+        # Parameters: initial state (3) + prev control (2) + pose refs (3*(p+1)) + speed refs (p+1)
+        P = ca.SX.sym('P', n_states + n_controls + (self.p+1)*3 + (self.p+1))
         
         cost_fn = 0
         g = []
@@ -104,7 +107,9 @@ class PathFollowing(Subsystem):
         # Unpack parameters
         x_init = P[0:3]
         u_prev = P[3:5]
-        ref_traj = ca.reshape(P[5:], 3, self.p+1)
+        pose_ref_end = 5 + (self.p+1)*3
+        ref_traj = ca.reshape(P[5:pose_ref_end], 3, self.p+1)
+        v_ref = P[pose_ref_end:pose_ref_end + self.p + 1]
         
         # Initial state constraint
         g.append(X[:, 0] - x_init)
@@ -118,6 +123,8 @@ class PathFollowing(Subsystem):
                                   (st - ref_traj[:, k])])
             # Input effort cost
             cost_fn += ca.mtimes([con.T, np.diag(self.R_diag), con])
+            # Speed tracking cost (track desired speed reference)
+            cost_fn += self.V_weight * (con[0] - v_ref[k])**2
             # Smoothness cost
             u_compare = u_prev if k == 0 else U[:, k-1]
             cost_fn += ca.mtimes([(con - u_compare).T, np.diag(self.Rd_diag), 
@@ -153,7 +160,11 @@ class PathFollowing(Subsystem):
         return ca.nlpsol('solver', 'ipopt', nlp_prob, opts), n_states, n_controls
     
     def _generate_reference(self, cur_state):
-        """Generate reference trajectory from path matrix."""
+        """Generate reference trajectory from path matrix using fixed arc-length spacing.
+        
+        Uses constant arc-length intervals independent of speed to decouple path planning
+        from speed control. Speed is handled separately via the speed reference trajectory.
+        """
         if self.path_matrix is None:
             return np.zeros((self.p + 1, 3))
         
@@ -170,11 +181,21 @@ class PathFollowing(Subsystem):
         interp_theta = interp1d(s_wp, theta_wp, kind='cubic', fill_value='extrapolate')
         
         distances = np.sqrt((x_wp - cur_state[0])**2 + (y_wp - cur_state[1])**2)
-        s_cur = s_wp[np.argmin(distances)]
+        closest_idx = np.argmin(distances)
         
+        # Interpolate arc-length at robot's position for better accuracy
+        if closest_idx == len(x_wp) - 1:
+            s_cur = s_wp[-1]
+        else:
+            # Linear interpolation between two closest waypoints
+            sum_distances = distances[closest_idx] + distances[closest_idx + 1]
+            alpha = distances[closest_idx] / sum_distances if sum_distances > 0 else 0
+            s_cur = s_wp[closest_idx] * (1 - alpha) + s_wp[closest_idx + 1] * alpha
+        
+        # Fixed arc-length spacing (independent of speed changes)
         ref = np.zeros((self.p + 1, 3))
         for i in range(self.p + 1):
-            s_f = min(s_cur + i * self.ds, s_wp[-1])
+            s_f = min(s_cur + i * self.ds_ref, s_wp[-1])
             ref[i, :] = [interp_x(s_f), interp_y(s_f), interp_theta(s_f)]
         return ref
     
@@ -186,6 +207,46 @@ class PathFollowing(Subsystem):
         """
         with self._lock:
             self.path_matrix = np.asarray(path_matrix, dtype=float)
+    
+    def set_nominal_speed(self, speed_percent):
+        """Set the desired nominal speed for path following.
+        
+        Args:
+            speed_percent: Speed as a percentage of maximum (0-100).
+                          Negative values indicate reverse direction.
+        """
+        with self._lock:
+            clamped_percent = np.clip(speed_percent, -100, 100)
+            self.v_nom = (clamped_percent / 100.0) * Constants.rear_motor_top_speed
+            self.ds = self.v_nom * self.Ts
+            logger.debug(f"Set nominal speed: {speed_percent}% -> {self.v_nom:.3f} m/s")
+    
+    def get_nominal_speed(self):
+        """Get the current nominal speed setting.
+        
+        Returns:
+            tuple: (speed_m_s, speed_percent) - speed in m/s and percentage
+        """
+        with self._lock:
+            speed_percent = (self.v_nom / Constants.rear_motor_top_speed) * 100.0
+            return self.v_nom, speed_percent
+    
+    def set_speed_tracking_weight(self, weight):
+        """Set the weight for speed tracking in the MPC cost function.
+        
+        Higher weight = MPC prioritizes tracking desired speed over other objectives.
+        Lower weight = MPC has more freedom to deviate from speed for better path tracking.
+        
+        Args:
+            weight: Positive float value. Typical range: 0.5 - 20.0 (default: 5.0)
+        """
+        if weight <= 0:
+            logger.warning(f"Speed tracking weight must be positive. Got {weight}, ignoring.")
+            return
+        
+        with self._lock:
+            self.V_weight = weight
+            logger.debug(f"Set speed tracking weight: {weight}")
     
     def get_path(self):
         """Get the current reference path.
@@ -306,8 +367,13 @@ class PathFollowing(Subsystem):
                 # Generate reference trajectory
                 refs = self._generate_reference(cur_state)
                 
+                # Generate speed reference trajectory (constant nominal speed)
+                with self._lock:
+                    v_nom_current = self.v_nom
+                v_ref = np.full(self.p + 1, v_nom_current)
+                
                 # Prepare parameters
-                params = np.concatenate([cur_state, self._last_u, refs.flatten()])
+                params = np.concatenate([cur_state, self._last_u, refs.flatten(), v_ref])
                 
                 # Solve MPC
                 solver_args = {

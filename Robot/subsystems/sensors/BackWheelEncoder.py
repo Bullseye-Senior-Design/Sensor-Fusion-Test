@@ -7,7 +7,7 @@ import logging
 from Robot.subsystems.KalmanStateEstimator import KalmanStateEstimator
 
 logger = logging.getLogger(f"{__name__}.BackWheelEncoder")
-logger.setLevel(logging.DEBUG)  # Set to DEBUG for detailed output
+logger.setLevel(logging.INFO)  # Set to INFO for detailed output
 
 import RPi.GPIO as GPIO
 
@@ -48,7 +48,7 @@ class BackWheelEncoder:
         self._velocity = 0.0  # m/s
         self._last_update_time = time.time()
         self.state_estimator = KalmanStateEstimator()
-        logger.info("edge {edge}, debounce {debounce}ms".format(edge=self.edge, debounce=self.debounce_ms))
+        logger.debug("edge {edge}, debounce {debounce}ms".format(edge=self.edge, debounce=self.debounce_ms))
         
         # Wheel parameters
         self.wheel_circumference = wheel_circumference  # meters (adjust to your wheel)
@@ -107,7 +107,7 @@ class BackWheelEncoder:
             
             #logger.info(f"count ={self._count} reset for next interval")
             self._velocity = distance / dt
-            logger.info(f"Encoder velocity: {self._velocity:.3f} m/s over dt={dt:.3f}s with count={count}")
+            logger.debug(f"Encoder velocity: {self._velocity:.3f} m/s over dt={dt:.3f}s with count={count}")
             self.state_estimator.update_encoder_velocity(self._velocity)
                 
             # Reset for next 
