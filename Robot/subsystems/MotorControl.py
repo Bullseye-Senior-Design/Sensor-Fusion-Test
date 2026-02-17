@@ -5,6 +5,10 @@ from structure.Subsystem import Subsystem
 from Robot.subsystems.KalmanStateEstimator import KalmanStateEstimator
 from Robot.Constants import Constants
 import math
+import logging
+
+logger = logging.getLogger(f"{__name__}.MotorControl")
+logger.setLevel(logging.INFO)  # Set to DEBUG for detailed output
 
 
 class MotorControl(Subsystem):
@@ -41,9 +45,9 @@ class MotorControl(Subsystem):
         """Initialize I2C bus connection."""
         try:
             self._bus = smbus2.SMBus(self.i2c_bus_num)
-            print(f"MotorControl: I2C bus {self.i2c_bus_num} initialized")
+            logger.info(f"MotorControl: I2C bus {self.i2c_bus_num} initialized")
         except Exception as e:
-            print(f"MotorControl: I2C initialization failed: {e}")
+            logger.error(f"MotorControl: I2C initialization failed: {e}")
             self._bus = None
     
     def set_speed_angle(self, speed: int, angle: int):
@@ -75,7 +79,7 @@ class MotorControl(Subsystem):
             try:
                 self._bus.write_i2c_block_data(self.esp32_addr, 0, data)
             except Exception as e:
-                print(f"MotorControl: I2C write failed: {e}")
+                logger.error(f"MotorControl: I2C write failed: {e}")
                 # Try to reinitialize I2C bus
                 self._init_i2c()
     
@@ -96,7 +100,7 @@ class MotorControl(Subsystem):
         if self._bus is not None:
             try:
                 self._bus.close()
-                print("MotorControl: I2C bus closed")
+                logger.info("MotorControl: I2C bus closed")
             except Exception:
                 pass
             self._bus = None
