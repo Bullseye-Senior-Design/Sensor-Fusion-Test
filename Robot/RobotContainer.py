@@ -36,10 +36,9 @@ class RobotContainer:
                     
     def begin_data_log(self):
         LogDataCmd(self.path_following).schedule()
-        ZeroIMUCmd().schedule()
-        time.sleep(5)  # Wait for some data to be collected before starting plotting
+        ZeroIMUCmd(self.motor_control, self.path_following).schedule()
         PlotStateCmd().schedule()
-        FollowPathCmd(self.motor_control, self.path_following).schedule()
+        
         
         
         # AlignIMUToWorldCmd(tau=0.5, duration=30.0).schedule()
