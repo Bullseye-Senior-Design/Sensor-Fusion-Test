@@ -8,7 +8,7 @@ import math
 import logging
 
 logger = logging.getLogger(f"{__name__}.MotorControl")
-logger.setLevel(logging.INFO)  # Set to DEBUG for detailed output
+logger.setLevel(logging.DEBUG)  # Set to DEBUG for detailed output
 
 
 class MotorControl(Subsystem):
