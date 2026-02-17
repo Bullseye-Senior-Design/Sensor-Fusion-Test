@@ -183,7 +183,8 @@ class UWBTag:
                     quality=qf, 
                     timestamp=time.time()
                 )
-                # Found it! We can return. 
+                
+                logger.debug(f"Raw Position Data: x={pos_data.x:.3f}m, y={pos_data.y:.3f}m, z={pos_data.z:.3f}m, qf={pos_data.quality}")
                 # Note: The 'Distances' packet (0x48) might still be coming.
                 # It will stay in the OS serial buffer and be read as "garbage" 
                 # (skipped) in the next loop iteration, which is fine.
