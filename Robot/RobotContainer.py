@@ -31,11 +31,11 @@ class RobotContainer:
         self.back_Wheel_encoder.start(pin=Constants.back_right_encoder_pin, active_high=True, pull_up=True, debounce_ms=10, edge='falling', wheel_circumference=Constants.wheel_circumference, counts_per_revolution=Constants.counts_per_revolution)
         
         #self.motor_control.default_command(MiniBullseyeControlCmd(self.motor_control, self.path_following))
-        # self.path_following.default_command(FollowPathCmd(self.motor_control, self.path_following))
+        self.path_following.default_command(FollowPathCmd(self.motor_control, self.path_following))
                     
     def begin_data_log(self):
         LogDataCmd(self.path_following).schedule()
-        # PlotStateCmd().schedule()
+        PlotStateCmd().schedule()
         ZeroIMUCmd().schedule()
         
         # AlignIMUToWorldCmd(tau=0.5, duration=30.0).schedule()
