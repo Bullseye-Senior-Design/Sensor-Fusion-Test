@@ -5,6 +5,7 @@ from Robot.subsystems.sensors.UWB import UWB
 from Robot.subsystems.sensors.IMU import IMU
 from Robot.subsystems.PathFollowing import PathFollowing
 from Robot.subsystems.MotorControl import MotorControl
+import time
 
 from Robot.subsystems.sensors.BackWheelEncoder import BackWheelEncoder
 from Robot.subsystems.Clutches import Clutches
@@ -31,12 +32,15 @@ class RobotContainer:
         self.back_Wheel_encoder.start(pin=Constants.back_right_encoder_pin, active_high=True, pull_up=True, debounce_ms=10, edge='falling', wheel_circumference=Constants.wheel_circumference, counts_per_revolution=Constants.counts_per_revolution)
         
         #self.motor_control.default_command(MiniBullseyeControlCmd(self.motor_control, self.path_following))
-        self.path_following.default_command(FollowPathCmd(self.motor_control, self.path_following))
+        #self.path_following.default_command(FollowPathCmd(self.motor_control, self.path_following))
                     
     def begin_data_log(self):
         LogDataCmd(self.path_following).schedule()
-        PlotStateCmd().schedule()
         ZeroIMUCmd().schedule()
+        time.sleep(5)  # Wait for some data to be collected before starting plotting
+        PlotStateCmd().schedule()
+        FollowPathCmd(self.motor_control, self.path_following).schedule()
+        
         
         # AlignIMUToWorldCmd(tau=0.5, duration=30.0).schedule()
                 
