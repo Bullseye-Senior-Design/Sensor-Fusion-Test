@@ -172,6 +172,7 @@ class UWBTag:
                     quality=qf, 
                     timestamp=time.time()
                 )
+                logger.debug(f"Received UWB Position: x={pos_data.x:.3f}m, y={pos_data.y:.3f}m, z={pos_data.z:.3f}m, quality={pos_data.quality}")
                 # We found data, we can return immediately
                 return LocationData(None, pos_data)
             
