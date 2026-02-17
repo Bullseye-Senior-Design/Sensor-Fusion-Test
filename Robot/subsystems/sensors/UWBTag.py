@@ -248,7 +248,7 @@ class UWBTag:
                 # However, to prevent CPU melting if USB is disconnected, we do a tiny yield
                 # if no data was found, but strictly 0 if we are getting data.
                 if not loc_data.position:
-                    time.sleep(0.001) 
+                    time.sleep(0.1) 
 
         self.read_thread = threading.Thread(target=read_loop, daemon=True)
         self.read_thread.start()
