@@ -23,7 +23,7 @@ import numpy as np
 from Robot.subsystems.KalmanStateEstimator import KalmanStateEstimator
 
 # Configure logging
-logger = logging.getLogger(f"{__name__}.UWBTag")
+logger = logging.getLogger(f"UWBTag")
 logger.setLevel(logging.DEBUG)  # Set to DEBUG for detailed output
 
 @dataclass
@@ -143,17 +143,11 @@ class UWBTag:
             return None, None
 
     def get_location_data(self) -> LocationData:
-        """Sends request and reads response immediately."""
+        """Sends request and reads response robustly."""
         if not self.serial_connection:
             return LocationData(None, None)
-
-        # Flush any stale data in the input buffer
-        try:
-            self.serial_connection.reset_input_buffer()
-        except Exception:
-            pass
-
-        # Write 'dwm_loc_get' (0x0C)
+        
+        # 2. Write 'dwm_loc_get' (0x0C)
         try:
             self.serial_connection.write(b'\x0C\x00')
         except Exception:
@@ -161,21 +155,26 @@ class UWBTag:
 
         pos_data = None
         
-        # Short loop to capture the response (expecting 0x41 or 0x40)
-        # We don't wait long; we want to fail fast and retry if data is missing
+        # 3. Read loop: We wait slightly longer to ensure we capture the specific TLV we need
+        # The DWM1001 sends multiple TLVs. We must loop until we find 0x41 or timeout.
         start_t = time.perf_counter()
-        while (time.perf_counter() - start_t) < 0.05: 
+        
+        # We assume the loop cycle is faster than the serial baud rate transmission
+        while (time.perf_counter() - start_t) < 0.02: 
             t, v = self._read_tlv_frame()
-            if t is None or v is None:
-                continue # Keep trying within timeout
+            
+            if t is None:
+                continue 
 
-            if t == 0x41 and len(v) >= 13: # Position Data
+            # Type 0x41 is Position
+            if t == 0x41 and len(v) >= 13: 
                 x, y, z, qf = struct.unpack('<iiiB', v[:13])
                 
-                # Filter out zero readings with zero quality (stale/corrupt data)
-                if qf == 0 and x == 0 and y == 0 and z == 0:
-                    logger.debug(f"Ignoring zero reading with quality=0 (stale/corrupt frame)")
-                    continue
+                # Check for "invalid" zeros (Firmware couldn't solve position)
+                if qf == 0:
+                    # We continue looping here because we might want to clear the rest 
+                    # of the buffer, or we just accept we got a failed frame.
+                    return LocationData(None, None)
                 
                 pos_data = Position(
                     x=x/1000.0, 
@@ -184,14 +183,17 @@ class UWBTag:
                     quality=qf, 
                     timestamp=time.time()
                 )
-                logger.debug(f"Received UWB Position: x={pos_data.x:.3f}m, y={pos_data.y:.3f}m, z={pos_data.z:.3f}m, quality={pos_data.quality}")
-                # We found data, we can return immediately
+                # Found it! We can return. 
+                # Note: The 'Distances' packet (0x48) might still be coming.
+                # It will stay in the OS serial buffer and be read as "garbage" 
+                # (skipped) in the next loop iteration, which is fine.
                 return LocationData(None, pos_data)
             
-            elif t == 0x40: # Error/Status
+            # Type 0x40 is Error/Status
+            elif t == 0x40:
                 if len(v) > 0 and v[0] != 0:
-                    # If error is legitimate, stop trying this frame
-                    break
+                    # Error code returned (e.g. Busy)
+                    return LocationData(None, None)
 
         return LocationData(None, None)
 
@@ -264,7 +266,7 @@ class UWBTag:
                 # However, to prevent CPU melting if USB is disconnected, we do a tiny yield
                 # if no data was found, but strictly 0 if we are getting data.
                 if not loc_data.position:
-                    time.sleep(0.0001) 
+                    time.sleep(0.001) 
 
         self.read_thread = threading.Thread(target=read_loop, daemon=True)
         self.read_thread.start()
