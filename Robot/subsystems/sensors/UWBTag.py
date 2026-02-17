@@ -249,8 +249,7 @@ class UWBTag:
                 # We loop immediately to catch the next UART byte as soon as it arrives.
                 # However, to prevent CPU melting if USB is disconnected, we do a tiny yield
                 # if no data was found, but strictly 0 if we are getting data.
-                if not loc_data.position:
-                    time.sleep(0.1) 
+                time.sleep(0.01) 
 
         self.read_thread = threading.Thread(target=read_loop, daemon=True)
         self.read_thread.start()
