@@ -4,6 +4,18 @@ from structure.RobotState import RobotState
 from Robot.subsystems.sensors.UWB import UWB
 
 import time
+import logging
+import sys
+
+# Configure root logger for the entire application
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler('robot_debug.log')
+    ]
+)
 
 def main():
     
