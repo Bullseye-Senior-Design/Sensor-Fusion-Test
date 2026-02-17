@@ -163,7 +163,7 @@ class UWBTag:
         while (time.perf_counter() - start_t) < 0.02: 
             t, v = self._read_tlv_frame()
             
-            if t is None:
+            if t is None or v is None:
                 continue 
 
             # Type 0x41 is Position
