@@ -211,7 +211,9 @@ class UWBTag:
             last_log_time = time.time()
             
             while self.is_reading:
-                self._stats_reads += 1
+                
+                logger.debug(f"Time since last log: {time.time() - last_log_time:.2f}s")
+                last_log_time = time.time()
                 
                 # 1. Get Data (Blocking call via serial, but fast)
                 loc_data = self.get_location_data()
