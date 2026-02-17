@@ -8,11 +8,15 @@ import busio
 import adafruit_bno055
 import math
 import numpy as np
+import logging
 from collections import deque
 import time
 from typing import Optional, Tuple
 from Robot.subsystems.KalmanStateEstimator import KalmanStateEstimator
 from Robot.MathUtil import MathUtil
+
+logger = logging.getLogger(f"{__name__}.IMU")
+logger.setLevel(logging.DEBUG)  # Set to DEBUG for detailed output
 
 # implement a simple low-pass IIR filter for smoothing IMU data
 # cutoff frequency fc_hz, sampling frequency fs_hz
@@ -192,7 +196,10 @@ class IMU():
     def begin(self):
         def _update_loop():
             while True:
-                self.update()
+                try:
+                    self.update()
+                except Exception as e:
+                    logger.error(f"IMU update failed: {e}")
         
         threading.Thread(target=_update_loop, daemon=True).start()
         
