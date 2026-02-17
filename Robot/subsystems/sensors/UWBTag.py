@@ -147,6 +147,12 @@ class UWBTag:
         if not self.serial_connection:
             return LocationData(None, None)
 
+        # Flush any stale data in the input buffer
+        try:
+            self.serial_connection.reset_input_buffer()
+        except Exception:
+            pass
+
         # Write 'dwm_loc_get' (0x0C)
         try:
             self.serial_connection.write(b'\x0C\x00')
@@ -165,6 +171,12 @@ class UWBTag:
 
             if t == 0x41 and len(v) >= 13: # Position Data
                 x, y, z, qf = struct.unpack('<iiiB', v[:13])
+                
+                # Filter out zero readings with zero quality (stale/corrupt data)
+                if qf == 0 and x == 0 and y == 0 and z == 0:
+                    logger.debug(f"Ignoring zero reading with quality=0 (stale/corrupt frame)")
+                    continue
+                
                 pos_data = Position(
                     x=x/1000.0, 
                     y=y/1000.0, 
