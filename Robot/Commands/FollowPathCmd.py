@@ -33,6 +33,11 @@ class FollowPathCmd(Command):
         self.add_requirement(motor_control)
         self.add_requirement(path_following)
         
+        self._last_update_time = 0.0
+        
+    def initialize(self):
+        """Start path following."""
+        
         # Get current position from EKF
         state_estimator = KalmanStateEstimator()
         current_state = state_estimator.get_state()
@@ -48,10 +53,6 @@ class FollowPathCmd(Command):
         self.path_matrix[:, 1] = start_y + np.linspace(0, distance, num_points) * np.sin(start_yaw)
         self.path_matrix[:, 2] = start_yaw  # Keep same heading
         
-        self._last_update_time = 0.0
-        
-    def initialize(self):
-        """Start path following."""
         # Set path and start navigation
         self.path_following.set_path(self.path_matrix)
         
