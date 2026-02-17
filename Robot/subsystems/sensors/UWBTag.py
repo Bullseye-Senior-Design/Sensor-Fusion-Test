@@ -223,10 +223,10 @@ class UWBTag:
                         # 2. Check if data is STALE (Duplicate)
                         # We compare X, Y, Z. If they are identical to the last read,
                         # the tag has not updated its calculation yet.
+                        logger.debug(f"Comparing positions: Last={self.last_position} vs New={loc_data.position}")
                         if (self.last_position is None) or (loc_data.position != self.last_position):
                             self.last_position = loc_data.position
                             process_update = True
-                            self._stats_updates += 1
                     
                     # 3. Only update EKF if the data is NEW
                     if process_update:
@@ -242,26 +242,7 @@ class UWBTag:
                                 self.state_estimator.update_uwb_range(meas, use_offset= False)
                         except Exception as e:
                             logger.error(f"EKF Update Error: {e}")
-
-                # 4. Reporting (1Hz)
-                now = time.time()
-                if now - last_log_time > 1.0:
-                    with self.position_lock:
-                        current = self.last_position
-                    
-                    hz_poll = self._stats_reads / (now - last_log_time)
-                    hz_update = self._stats_updates / (now - last_log_time)
-                    
-                    log_msg = f"Poll: {hz_poll:.0f}Hz | Fresh Updates: {hz_update:.1f}Hz"
-                    if current:
-                        log_msg += f" | Pos: ({current.x:.2f}, {current.y:.2f})"
-                    
-                    logger.debug(log_msg)
-                    
-                    last_log_time = now
-                    self._stats_reads = 0
-                    self._stats_updates = 0
-                
+                            
                 # 5. NO SLEEP. 
                 # We loop immediately to catch the next UART byte as soon as it arrives.
                 # However, to prevent CPU melting if USB is disconnected, we do a tiny yield
