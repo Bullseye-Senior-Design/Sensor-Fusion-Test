@@ -84,6 +84,10 @@ class KalmanStateEstimator:
         self.u_velocity = 0.0  # Rear wheel velocity [m/s]
         self.u_steering = 0.0  # Front wheel steering angle [rad]
         
+        # Batch UWB measurement storage
+        self._uwb_batch = {}  # {tag_id: (timestamp, position, offset, use_offset)}
+        self._uwb_batch_timeout = 0.025  # Maximum wait time in seconds
+        
         threading.Thread(target=self._run_loop, daemon=True).start()
 
     # --- Helpers to access parts of the full state
@@ -426,6 +430,52 @@ class KalmanStateEstimator:
             # Joseph form for numerical stability (9x9)
             I = np.eye(9)
             self.P = (I - K @ H) @ self.P @ (I - K @ H).T + (K * R_meas) @ K.T
+
+    def batch_uwb(self, tag_id: int, tag_pos_meas: np.ndarray, tag_offset: np.ndarray | None = None, use_offset: bool = True):
+        """Batch UWB update that waits for measurements from two tags before processing.
+        
+        This function stores measurements from each tag and waits up to 0.025s for
+        measurements from both tags. When both are available (or timeout occurs),
+        it processes all available measurements together.
+        
+        Args:
+            tag_id: Integer identifier for the UWB tag (e.g., 0 or 1)
+            tag_pos_meas: (3,) measured tag position in world frame [m]
+            tag_offset: (3,) tag offset in body frame from robot center [m]; None => [0,0,0]
+            use_offset: Whether to apply the tag offset
+        """
+        with self._lock:
+            current_time = time.time()
+            
+            # Store this measurement
+            self._uwb_batch[tag_id] = (
+                current_time,
+                np.asarray(tag_pos_meas, dtype=float).reshape(3),
+                tag_offset,
+                use_offset
+            )
+            
+            # Check if we should process the batch
+            should_process = False
+            
+            if len(self._uwb_batch) >= 2:
+                # We have measurements from at least 2 tags - process immediately
+                should_process = True
+            elif len(self._uwb_batch) == 1:
+                # Only one measurement - check if we should wait or timeout
+                # Don't wait here, just return and let the next call trigger processing
+                # Check age of oldest measurement
+                oldest_time = min(t for t, _, _, _ in self._uwb_batch.values())
+                if current_time - oldest_time >= self._uwb_batch_timeout:
+                    should_process = True
+            
+            if should_process:
+                # Process all stored measurements
+                for tid, (_, pos, offset, use_off) in self._uwb_batch.items():
+                    self.update_uwb_range(pos, offset, use_off)
+                
+                # Clear the batch
+                self._uwb_batch.clear()
 
     def _inject_error_state(self, dx: np.ndarray):
         """Inject 9-vector error state into the full state x and renormalize quaternion.
