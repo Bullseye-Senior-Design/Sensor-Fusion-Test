@@ -436,7 +436,8 @@ class KalmanStateEstimator:
         
         This function stores measurements from each tag and waits up to 0.025s for
         measurements from both tags. When both are available (or timeout occurs),
-        it processes all available measurements together.
+        it processes all available measurements together in a single stacked Kalman update
+        to avoid ping-pong errors from sequential updates.
         
         Args:
             tag_id: Integer identifier for the UWB tag (e.g., 0 or 1)
@@ -470,12 +471,106 @@ class KalmanStateEstimator:
                     should_process = True
             
             if should_process:
-                # Process all stored measurements
-                for tid, (_, pos, offset, use_off) in self._uwb_batch.items():
-                    self.update_uwb_range(pos, offset, use_off)
-                
+                # Process all stored measurements as a single stacked update
+                self._process_stacked_uwb_update()
                 # Clear the batch
                 self._uwb_batch.clear()
+    
+    def _process_stacked_uwb_update(self):
+        """Process stored UWB measurements as a single stacked update.
+        
+        Stacks all measurements into a single measurement vector and performs
+        one Kalman update to avoid ping-pong errors from sequential updates.
+        """
+        # This assumes _lock is already held by caller
+        if not self._uwb_batch:
+            return
+        
+        # Check for any valid measurement to initialize
+        for _, (_, pos, _, _) in self._uwb_batch.items():
+            if not self.is_initialized:
+                if np.all(np.isfinite(pos)):
+                    self.x[0:3] = pos  # Set initial position
+                    self.is_initialized = True
+                    return
+        
+        # Don't update if still not initialized
+        if not self.is_initialized:
+            return
+        
+        # Get current rotation matrix (shared for all tags)
+        q = MathUtil.quat_normalize(self.quat)
+        R = MathUtil.quat_to_rotmat(q)
+        
+        # Build stacked measurement vector and Jacobian
+        z_list = []
+        h_list = []
+        H_list = []
+        
+        def skew(v):
+            return np.array([[0, -v[2], v[1]],
+                             [v[2], 0, -v[0]],
+                             [-v[1], v[0], 0]])
+        
+        for tag_id in sorted(self._uwb_batch.keys()):
+            _, pos, offset, use_off = self._uwb_batch[tag_id]
+            
+            # Skip non-finite measurements
+            if not np.all(np.isfinite(pos)):
+                continue
+            
+            # Decide whether to apply the offset
+            o_b = np.zeros(3)
+            if use_off and offset is not None:
+                o_b = np.asarray(offset, dtype=float).reshape(3)
+            
+            # Measurement
+            z_list.append(pos)
+            
+            # Prediction h(x) = p + R @ o_b
+            h = self.pos + R @ o_b
+            h_list.append(h)
+            
+            # Jacobian H (3x9): [ I3  03  R[o]_x ]
+            H = np.zeros((3, 9))
+            H[:, 0:3] = np.eye(3)
+            if np.any(o_b):
+                H[:, 6:9] = R @ skew(o_b)
+            H_list.append(H)
+        
+        # Check if we have valid measurements
+        if not z_list:
+            return
+        
+        # Stack into single vectors/matrices
+        z_stacked = np.concatenate(z_list)  # (3*N, )
+        h_stacked = np.concatenate(h_list)  # (3*N, )
+        H_stacked = np.vstack(H_list)       # (3*N, 9)
+        
+        # Innovation
+        y = z_stacked - h_stacked
+        
+        # Measurement covariance (block diagonal)
+        n_meas = len(z_list)
+        R_single = np.eye(3) * self.R_uwb_range
+        R_stacked = block_diag(*[R_single for _ in range(n_meas)])
+        
+        # Kalman update
+        S = H_stacked @ self.P @ H_stacked.T + R_stacked
+        try:
+            Sinv = np.linalg.inv(S)
+        except np.linalg.LinAlgError:
+            return
+        
+        K = self.P @ H_stacked.T @ Sinv
+        dx = (K @ y).flatten()
+        
+        # Inject error state
+        self._inject_error_state(dx)
+        
+        # Update covariance (Joseph form for numerical stability)
+        I = np.eye(9)
+        self.P = (I - K @ H_stacked) @ self.P @ (I - K @ H_stacked).T + K @ R_stacked @ K.T
 
     def _inject_error_state(self, dx: np.ndarray):
         """Inject 9-vector error state into the full state x and renormalize quaternion.
