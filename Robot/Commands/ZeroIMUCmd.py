@@ -21,11 +21,14 @@ class ZeroIMUCmd(Command):
     def __init__(self,
                  motor_control: MotorControl,
                  path_following: PathFollowing,
+                 schedule_followup: bool = True, 
                  sample_count: int = 10):
         super().__init__()
         self._imu = IMU()
         self.motor_control = motor_control
         self.path_following = path_following
+        self.schedule_followup = schedule_followup
+        
         self._applied = False
         self.sample_count = int(sample_count)
         self._samples = []
@@ -80,7 +83,8 @@ class ZeroIMUCmd(Command):
     def end(self, interrupted):
         if interrupted and not self._applied:
             print("ZeroIMUCmd: interrupted before applying yaw offset")
-        FollowPathCmd(self.motor_control, self.path_following).schedule()
+        if self.schedule_followup:
+            FollowPathCmd(self.motor_control, self.path_following).schedule()
 
     def is_finished(self):
         return self._applied

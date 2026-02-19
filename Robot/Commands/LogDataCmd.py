@@ -23,11 +23,12 @@ from Robot.Commands.log_data.csvlib import CSVFileManager, write_csv_or_fallback
 
 class LogDataCmd(Command):
     # CSV field names
-    UWB_FIELDNAMES = ['timestamp', 'x1', 'y1', 'z1', 'quality1', 'x2', 'y2', 'z2', 'quality2']
+    UWB_FIELDNAMES = ['timestamp', 'tag_id', 'x', 'y', 'z', 'quality']
     ANCHORS_FIELDNAMES = ['timestamp', 'port', 'name', 'id', 'x', 'y', 'z', 'range']
     STATE_FIELDNAMES = ['timestamp', 'px', 'py', 'pz', 'vx', 'vy', 'vz', 'yaw', 'pitch', 'roll']
     IMU_FIELDNAMES = ['timestamp', 'yaw', 'pitch', 'roll', 'ax', 'ay', 'az', 'gx', 'gy', 'gz', 'mx', 'my', 'mz']
     ENCODER_FIELDNAMES = ['timestamp', 'count', 'velocity']
+    CONTROL_INPUTS_FIELDNAMES = ['timestamp', 'velocity_mps', 'steering_angle_rad', 'steering_angle_deg']
     PATH_FOLLOWING_FIELDNAMES = ['timestamp', 'motor_speed_mps', 'steering_angle_rad', 'steering_angle_deg']
     
     def __init__(self, path_following: PathFollowing):
@@ -84,6 +85,7 @@ class LogDataCmd(Command):
         self.imu_file_path = str(self.log_dir / 'imu_orientation.csv')
         self.cov_file_path = str(self.log_dir / 'ekf_covariance.txt')
         self.encoder_file_path = str(self.log_dir / 'encoder_data.csv')
+        self.control_inputs_file_path = str(self.log_dir / 'control_inputs.csv')
         self.path_following_file_path = str(self.log_dir / 'path_following.csv')
 
         # Setup CSV files with manager
@@ -92,6 +94,7 @@ class LogDataCmd(Command):
         self.csv_manager.setup_file(self.state_file_path, self.STATE_FIELDNAMES)
         self.csv_manager.setup_file(self.imu_file_path, self.IMU_FIELDNAMES)
         self.csv_manager.setup_file(self.encoder_file_path, self.ENCODER_FIELDNAMES)
+        self.csv_manager.setup_file(self.control_inputs_file_path, self.CONTROL_INPUTS_FIELDNAMES)
         self.csv_manager.setup_file(self.path_following_file_path, self.PATH_FOLLOWING_FIELDNAMES)
         
         # Setup covariance text file separately (not CSV)
@@ -110,14 +113,15 @@ class LogDataCmd(Command):
         """
         ts = time.time()
 
-        # 1) UWB positions
+        # 1) UWB positions with tag IDs
         uwb = UWB()
         positions = uwb.get_positions() or []
-            
-        # take up to two positions (older code expected two)
-        p1 = positions[0] if len(positions) > 0 else None
-        p2 = positions[1] if len(positions) > 1 else None
-        self.save_uwb_pos_to_csv(p1, p2, self.uwb_file_path, timestamp=ts)
+        
+        # Log each position with its tag ID
+        for idx, position in enumerate(positions):
+            if position is not None and idx < len(uwb.tags):
+                tag_id = uwb.tags[idx].id
+                self.save_uwb_pos_to_csv(position, tag_id, self.uwb_file_path, timestamp=ts)
 
         # Also record anchor information (text file) for debugging / reference
         anchors = uwb.get_latest_anchor_info()
@@ -152,11 +156,16 @@ class LogDataCmd(Command):
 
         # 4) Encoder data
         encoder = BackWheelEncoder()
-        # count = encoder.get_count()
+        count = encoder.get_count()
         velocity = encoder.get_velocity()
-        # self.save_encoder_to_csv(count, velocity, self.encoder_file_path, timestamp=ts)
+        self.save_encoder_to_csv(count, velocity, self.encoder_file_path, timestamp=ts)
 
-        # 5) Path following data (motor speed and steering angle)
+        # 5) Control inputs from Kalman State Estimator
+        kf = KalmanStateEstimator()
+        ctrl_velocity, ctrl_steering = kf.get_control_inputs()
+        self.save_control_inputs_to_csv(ctrl_velocity, ctrl_steering, self.control_inputs_file_path, timestamp=ts)
+
+        # 6) Path following data (motor speed and steering angle)
         if self.path_following.is_running():
             v_cmd, delta_cmd = self.path_following.get_current_commands()
             self.save_path_following_to_csv(v_cmd, delta_cmd, self.path_following_file_path, timestamp=ts)
@@ -171,13 +180,13 @@ class LogDataCmd(Command):
     def is_finished(self):
         return False
     
-    def save_uwb_pos_to_csv(self, position1: Optional[Position], position2: Optional[Position], filename: str, timestamp: Optional[float] = None) -> bool:
+    def save_uwb_pos_to_csv(self, position: Optional[Position], tag_id: int, filename: str, timestamp: Optional[float] = None) -> bool:
         """
-        Save a position reading to a CSV file
+        Save a position reading to a CSV file with tag ID
         
         Args:
-            position1: First Position object to save
-            position2: Second Position object to save
+            position: Position object to save
+            tag_id: Tag ID associated with this position
             filename: CSV filename
             timestamp: Optional timestamp
             
@@ -190,14 +199,11 @@ class LogDataCmd(Command):
         ts = timestamp if timestamp is not None else time.time()
         row = {
             'timestamp': ts,
-            'x1': _safe_get(position1, 'x', ''),
-            'y1': _safe_get(position1, 'y', ''),
-            'z1': _safe_get(position1, 'z', ''),
-            'quality1': _safe_get(position1, 'quality', ''),
-            'x2': _safe_get(position2, 'x', ''),
-            'y2': _safe_get(position2, 'y', ''),
-            'z2': _safe_get(position2, 'z', ''),
-            'quality2': _safe_get(position2, 'quality', ''),
+            'tag_id': tag_id,
+            'x': _safe_get(position, 'x', ''),
+            'y': _safe_get(position, 'y', ''),
+            'z': _safe_get(position, 'z', ''),
+            'quality': _safe_get(position, 'quality', ''),
         }
         
         # Try to get the file handle and writer from the manager; if not available, fallback to opening the file each time
@@ -350,6 +356,31 @@ class LogDataCmd(Command):
         
         fh, writer, _ = self.csv_manager.files.get(str(filename), (None, None, None)) if str(filename) in self.csv_manager.files else (None, None, None)
         return write_csv_or_fallback(writer, fh, filename, self.ENCODER_FIELDNAMES, row)
+
+    def save_control_inputs_to_csv(self, velocity: float, steering_angle: float, filename: str, timestamp: Optional[float] = None) -> bool:
+        """Save control inputs (velocity and steering angle) to CSV file.
+        
+        Args:
+            velocity: Rear wheel velocity in m/s
+            steering_angle: Front wheel steering angle in radians
+            filename: CSV filename
+            timestamp: Optional timestamp
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        ts = timestamp if timestamp is not None else time.time()
+        steering_angle_deg = float(steering_angle) * 180.0 / np.pi
+        
+        row = {
+            'timestamp': ts,
+            'velocity_mps': velocity,
+            'steering_angle_rad': steering_angle,
+            'steering_angle_deg': steering_angle_deg,
+        }
+        
+        fh, writer, _ = self.csv_manager.files.get(str(filename), (None, None, None)) if str(filename) in self.csv_manager.files else (None, None, None)
+        return write_csv_or_fallback(writer, fh, filename, self.CONTROL_INPUTS_FIELDNAMES, row)
 
     def save_path_following_to_csv(self, motor_speed: float, steering_angle: float, filename: str, timestamp: Optional[float] = None) -> bool:
         """Save path following motor speed and steering angle to CSV file.

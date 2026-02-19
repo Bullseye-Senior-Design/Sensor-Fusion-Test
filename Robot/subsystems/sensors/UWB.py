@@ -45,7 +45,7 @@ class UWB:
         # Use Any here so static checkers don't require resolving UWBTag symbols
         self.tags: List[UWBTag] = []
         for tag_info in uwb_tag_data:
-            tag = UWBTag(port=tag_info.port, anchors_pos_override=anchors_pos, baudrate=baudrate, timeout=timeout, tag_offset=tag_info.offset)
+            tag = UWBTag(port=tag_info.port, id=tag_info.id, anchors_pos_override=anchors_pos, tag_offset=tag_info.offset)
             self.tags.append(tag)
 
         if start_immediately:
