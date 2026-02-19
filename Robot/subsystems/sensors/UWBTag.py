@@ -146,6 +146,7 @@ class UWBTag:
         try:
             self.serial_connection.write(b'\x0C\x00')
         except Exception:
+            logger.error(f"Failed to write location request for tag {self.id}")
             return LocationData(None, None)
 
         pos_data = None
@@ -159,6 +160,7 @@ class UWBTag:
             t, v = self._read_tlv_frame()
             
             if t is None or v is None:
+                logger.debug(f"Failed to read TLV frame for tag {self.id}")
                 continue 
 
             # Type 0x41 is Position
@@ -169,6 +171,7 @@ class UWBTag:
                 if qf == 0:
                     # We continue looping here because we might want to clear the rest 
                     # of the buffer, or we just accept we got a failed frame.
+                    logger.debug(f"Received position with quality 0 for tag {self.id}, treating as invalid.")
                     return LocationData(None, None)
                 
                 pos_data = Position(
@@ -190,6 +193,7 @@ class UWBTag:
             elif t == 0x40:
                 if len(v) > 0 and v[0] != 0:
                     # Error code returned (e.g. Busy)
+                    logger.debug(f"Received error status for tag {self.id}: {v[0]}")
                     return LocationData(None, None)
 
         return LocationData(None, None)
