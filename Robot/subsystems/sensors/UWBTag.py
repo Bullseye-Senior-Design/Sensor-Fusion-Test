@@ -24,7 +24,7 @@ from Robot.subsystems.KalmanStateEstimator import KalmanStateEstimator
 
 # Configure logging
 logger = logging.getLogger(f"UWBTag")
-logger.setLevel(logging.INFO)  # Set to DEBUG for detailed output
+logger.setLevel(logging.DEBUG)  # Set to DEBUG for detailed output
 
 @dataclass
 class Position:
@@ -186,7 +186,7 @@ class UWBTag:
                     timestamp=time.time()
                 )
                 
-                logger.debug(f"Raw Position Data: x={pos_data.x:.3f}m, y={pos_data.y:.3f}m, z={pos_data.z:.3f}m, qf={pos_data.quality}")
+                logger.debug(f"Raw Position Data of Tag {self.id}: x={pos_data.x:.3f}m, y={pos_data.y:.3f}m, z={pos_data.z:.3f}m, qf={pos_data.quality}")
                 # Note: The 'Distances' packet (0x48) might still be coming.
                 # It will stay in the OS serial buffer and be read as "garbage" 
                 # (skipped) in the next loop iteration, which is fine.
