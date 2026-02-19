@@ -28,6 +28,7 @@ class LogDataCmd(Command):
     STATE_FIELDNAMES = ['timestamp', 'px', 'py', 'pz', 'vx', 'vy', 'vz', 'yaw', 'pitch', 'roll']
     IMU_FIELDNAMES = ['timestamp', 'yaw', 'pitch', 'roll', 'ax', 'ay', 'az', 'gx', 'gy', 'gz', 'mx', 'my', 'mz']
     ENCODER_FIELDNAMES = ['timestamp', 'count', 'velocity']
+    CONTROL_INPUTS_FIELDNAMES = ['timestamp', 'velocity_mps', 'steering_angle_rad', 'steering_angle_deg']
     PATH_FOLLOWING_FIELDNAMES = ['timestamp', 'motor_speed_mps', 'steering_angle_rad', 'steering_angle_deg']
     
     def __init__(self, path_following: PathFollowing):
@@ -84,6 +85,7 @@ class LogDataCmd(Command):
         self.imu_file_path = str(self.log_dir / 'imu_orientation.csv')
         self.cov_file_path = str(self.log_dir / 'ekf_covariance.txt')
         self.encoder_file_path = str(self.log_dir / 'encoder_data.csv')
+        self.control_inputs_file_path = str(self.log_dir / 'control_inputs.csv')
         self.path_following_file_path = str(self.log_dir / 'path_following.csv')
 
         # Setup CSV files with manager
@@ -92,6 +94,7 @@ class LogDataCmd(Command):
         self.csv_manager.setup_file(self.state_file_path, self.STATE_FIELDNAMES)
         self.csv_manager.setup_file(self.imu_file_path, self.IMU_FIELDNAMES)
         self.csv_manager.setup_file(self.encoder_file_path, self.ENCODER_FIELDNAMES)
+        self.csv_manager.setup_file(self.control_inputs_file_path, self.CONTROL_INPUTS_FIELDNAMES)
         self.csv_manager.setup_file(self.path_following_file_path, self.PATH_FOLLOWING_FIELDNAMES)
         
         # Setup covariance text file separately (not CSV)
@@ -157,7 +160,12 @@ class LogDataCmd(Command):
         velocity = encoder.get_velocity()
         # self.save_encoder_to_csv(count, velocity, self.encoder_file_path, timestamp=ts)
 
-        # 5) Path following data (motor speed and steering angle)
+        # 5) Control inputs from Kalman State Estimator
+        kf = KalmanStateEstimator()
+        ctrl_velocity, ctrl_steering = kf.get_control_inputs()
+        self.save_control_inputs_to_csv(ctrl_velocity, ctrl_steering, self.control_inputs_file_path, timestamp=ts)
+
+        # 6) Path following data (motor speed and steering angle)
         if self.path_following.is_running():
             v_cmd, delta_cmd = self.path_following.get_current_commands()
             self.save_path_following_to_csv(v_cmd, delta_cmd, self.path_following_file_path, timestamp=ts)
@@ -348,6 +356,31 @@ class LogDataCmd(Command):
         
         fh, writer, _ = self.csv_manager.files.get(str(filename), (None, None, None)) if str(filename) in self.csv_manager.files else (None, None, None)
         return write_csv_or_fallback(writer, fh, filename, self.ENCODER_FIELDNAMES, row)
+
+    def save_control_inputs_to_csv(self, velocity: float, steering_angle: float, filename: str, timestamp: Optional[float] = None) -> bool:
+        """Save control inputs (velocity and steering angle) to CSV file.
+        
+        Args:
+            velocity: Rear wheel velocity in m/s
+            steering_angle: Front wheel steering angle in radians
+            filename: CSV filename
+            timestamp: Optional timestamp
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        ts = timestamp if timestamp is not None else time.time()
+        steering_angle_deg = float(steering_angle) * 180.0 / np.pi
+        
+        row = {
+            'timestamp': ts,
+            'velocity_mps': velocity,
+            'steering_angle_rad': steering_angle,
+            'steering_angle_deg': steering_angle_deg,
+        }
+        
+        fh, writer, _ = self.csv_manager.files.get(str(filename), (None, None, None)) if str(filename) in self.csv_manager.files else (None, None, None)
+        return write_csv_or_fallback(writer, fh, filename, self.CONTROL_INPUTS_FIELDNAMES, row)
 
     def save_path_following_to_csv(self, motor_speed: float, steering_angle: float, filename: str, timestamp: Optional[float] = None) -> bool:
         """Save path following motor speed and steering angle to CSV file.

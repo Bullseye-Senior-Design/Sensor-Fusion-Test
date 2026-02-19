@@ -130,6 +130,11 @@ class KalmanStateEstimator:
         """Set front wheel steering angle control input [rad]."""
         with self._lock:
             self.u_steering = float(angle) if np.isfinite(angle) else 0.0
+            
+    def get_control_inputs(self) -> Tuple[float, float]:
+        """Get current control inputs (velocity, steering angle)."""
+        with self._lock:
+            return self.u_velocity, self.u_steering
     
     def _run_loop(self):
         """Background thread to run predict at fixed dt intervals."""
