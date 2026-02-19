@@ -33,13 +33,8 @@ class UWB:
         self,
         uwb_tag_data: List[UWBTagInfo],
         anchors_pos: List[Tuple[int, float, float, float]] | None,
-        baudrate: int = 115200,
-        timeout: float = 1.0,
-        interval: float = 0.1,
         start_immediately: bool = True,
-    ):
-        self.interval = interval
-        
+    ):        
         self.anchors_pos = anchors_pos
 
         # Use Any here so static checkers don't require resolving UWBTag symbols

@@ -66,6 +66,7 @@ class UWBTag:
             port: Serial port
         """
         self.port = port
+        print(f"Initializing UWBTag on port {port} with ID {id}")
         self.id = id
         self.baudrate = 115200
         self.timeout = 0.05
