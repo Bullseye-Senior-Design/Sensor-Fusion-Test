@@ -51,6 +51,7 @@ class UWB:
         positions: List[Position] = []
         for tag in self.tags:
             pos = tag.get_latest_position()
+            print(f"UWB: Tag {tag.id} latest position: {pos}")
             if pos is not None:
                 positions.append(pos)
         return positions
