@@ -57,7 +57,6 @@ class LogDataCmd(Command):
             # Expected format: YYYYMMDD_HHMMSS
             if len(folder_name) >= 15 and folder_name[8] == '_':
                 folder_time = time.mktime(time.strptime(folder_name[:15], '%Y%m%d_%H%M%S'))
-                print(f"Checking folder: {folder}, timestamp: {folder_time}")
                 age_seconds = current_time - folder_time
                 
                 if age_seconds > max_age_seconds:
@@ -157,9 +156,9 @@ class LogDataCmd(Command):
 
         # 4) Encoder data
         encoder = BackWheelEncoder()
-        # count = encoder.get_count()
+        count = encoder.get_count()
         velocity = encoder.get_velocity()
-        # self.save_encoder_to_csv(count, velocity, self.encoder_file_path, timestamp=ts)
+        self.save_encoder_to_csv(count, velocity, self.encoder_file_path, timestamp=ts)
 
         # 5) Control inputs from Kalman State Estimator
         kf = KalmanStateEstimator()
