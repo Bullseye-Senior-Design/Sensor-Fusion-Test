@@ -97,6 +97,10 @@ class UWBTag:
             )
             self.serial_connection.reset_input_buffer()
             self.serial_connection.reset_output_buffer()
+            # Give the serial port time to synchronize after reset
+            time.sleep(0.1)
+            # Final flush to clear any residual garbage
+            self.serial_connection.reset_input_buffer()
             self.is_connected = True
             logger.info("Connected to DWM1001 (Generic Mode)")
             return True
@@ -156,11 +160,12 @@ class UWBTag:
         start_t = time.perf_counter()
         
         # We assume the loop cycle is faster than the serial baud rate transmission
-        while (time.perf_counter() - start_t) < 0.02: 
+        while (time.perf_counter() - start_t) < 0.05: 
             t, v = self._read_tlv_frame()
             
             if t is None or v is None:
-                logger.debug(f"Failed to read TLV frame for tag {self.id}")
+                # Suppress this to debug-level to avoid log spam - only log if needed
+                logger.debug(f"Failed to read TLV frame for tag {self.id} (Expected more data)")
                 continue 
 
             # Type 0x41 is Position
