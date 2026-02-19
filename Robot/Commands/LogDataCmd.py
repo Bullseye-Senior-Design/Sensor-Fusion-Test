@@ -57,6 +57,7 @@ class LogDataCmd(Command):
             # Expected format: YYYYMMDD_HHMMSS
             if len(folder_name) >= 15 and folder_name[8] == '_':
                 folder_time = time.mktime(time.strptime(folder_name[:15], '%Y%m%d_%H%M%S'))
+                print(f"Checking folder: {folder}, timestamp: {folder_time}")
                 age_seconds = current_time - folder_time
                 
                 if age_seconds > max_age_seconds:
