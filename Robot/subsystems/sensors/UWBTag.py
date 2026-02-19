@@ -33,6 +33,7 @@ class Position:
     y: float
     z: float
     quality: int
+    id: int
     timestamp: float
 
     def __eq__(self, other):
@@ -41,7 +42,7 @@ class Position:
         # Exact float comparison is intentional here. 
         # If the DWM1001 hasn't updated, the bytes in memory are identical.
         # If it HAS updated, UWB noise ensures at least one float will differ slightly.
-        return self.x == other.x and self.y == other.y and self.z == other.z
+        return self.x == other.x and self.y == other.y and self.z == other.z and self.id == other.id
 
 @dataclass
 class TagInfo:
@@ -181,6 +182,7 @@ class UWBTag:
                     y=y/1000.0, 
                     z=z/1000.0, 
                     quality=qf, 
+                    id=self.id,
                     timestamp=time.time()
                 )
                 

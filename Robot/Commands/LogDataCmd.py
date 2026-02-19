@@ -118,10 +118,9 @@ class LogDataCmd(Command):
         positions = uwb.get_positions() or []
         
         # Log each position with its tag ID
-        for idx, position in enumerate(positions):
-            if position is not None and idx < len(uwb.tags):
-                tag_id = uwb.tags[idx].id
-                self.save_uwb_pos_to_csv(position, tag_id, self.uwb_file_path, timestamp=ts)
+        for position in positions:
+            if position is not None:
+                self.save_uwb_pos_to_csv(position, position.id, self.uwb_file_path, timestamp=ts)
 
         # Also record anchor information (text file) for debugging / reference
         anchors = uwb.get_latest_anchor_info()
