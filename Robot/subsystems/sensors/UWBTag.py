@@ -58,18 +58,17 @@ class UWBTag:
     Class to handle communication with DWM1001-DEV tag and read position data
     """
 
-    def __init__(self, port: str, anchors_pos_override: Optional[List[Tuple[int, float, float, float]]] = None, baudrate: int = 115200, timeout: float = 0.05, tag_offset: Optional[Tuple[float, float, float]] = None, interval: float = 0.1):
+    def __init__(self, port: str, id: int, anchors_pos_override: Optional[List[Tuple[int, float, float, float]]] = None,tag_offset: Optional[Tuple[float, float, float]] = None):
         """
         Initialize the DWM1001 reader in Low Latency Mode.
         
         Args:
             port: Serial port
-            baudrate: 115200 default
-            timeout: Serial read timeout. Kept low (0.05) for responsiveness.
         """
         self.port = port
-        self.baudrate = baudrate
-        self.timeout = timeout
+        self.id = id
+        self.baudrate = 115200
+        self.timeout = 0.05
         self.tag_offset = tag_offset
         self.anchors_pos_override = anchors_pos_override
         

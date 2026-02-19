@@ -23,7 +23,7 @@ from Robot.Commands.log_data.csvlib import CSVFileManager, write_csv_or_fallback
 
 class LogDataCmd(Command):
     # CSV field names
-    UWB_FIELDNAMES = ['timestamp', 'x1', 'y1', 'z1', 'quality1', 'x2', 'y2', 'z2', 'quality2']
+    UWB_FIELDNAMES = ['timestamp', 'tag_id', 'x', 'y', 'z', 'quality']
     ANCHORS_FIELDNAMES = ['timestamp', 'port', 'name', 'id', 'x', 'y', 'z', 'range']
     STATE_FIELDNAMES = ['timestamp', 'px', 'py', 'pz', 'vx', 'vy', 'vz', 'yaw', 'pitch', 'roll']
     IMU_FIELDNAMES = ['timestamp', 'yaw', 'pitch', 'roll', 'ax', 'ay', 'az', 'gx', 'gy', 'gz', 'mx', 'my', 'mz']
@@ -110,14 +110,15 @@ class LogDataCmd(Command):
         """
         ts = time.time()
 
-        # 1) UWB positions
+        # 1) UWB positions with tag IDs
         uwb = UWB()
         positions = uwb.get_positions() or []
-            
-        # take up to two positions (older code expected two)
-        p1 = positions[0] if len(positions) > 0 else None
-        p2 = positions[1] if len(positions) > 1 else None
-        self.save_uwb_pos_to_csv(p1, p2, self.uwb_file_path, timestamp=ts)
+        
+        # Log each position with its tag ID
+        for idx, position in enumerate(positions):
+            if position is not None and idx < len(uwb.tags):
+                tag_id = uwb.tags[idx].id
+                self.save_uwb_pos_to_csv(position, tag_id, self.uwb_file_path, timestamp=ts)
 
         # Also record anchor information (text file) for debugging / reference
         anchors = uwb.get_latest_anchor_info()
@@ -171,13 +172,13 @@ class LogDataCmd(Command):
     def is_finished(self):
         return False
     
-    def save_uwb_pos_to_csv(self, position1: Optional[Position], position2: Optional[Position], filename: str, timestamp: Optional[float] = None) -> bool:
+    def save_uwb_pos_to_csv(self, position: Optional[Position], tag_id: int, filename: str, timestamp: Optional[float] = None) -> bool:
         """
-        Save a position reading to a CSV file
+        Save a position reading to a CSV file with tag ID
         
         Args:
-            position1: First Position object to save
-            position2: Second Position object to save
+            position: Position object to save
+            tag_id: Tag ID associated with this position
             filename: CSV filename
             timestamp: Optional timestamp
             
@@ -190,14 +191,11 @@ class LogDataCmd(Command):
         ts = timestamp if timestamp is not None else time.time()
         row = {
             'timestamp': ts,
-            'x1': _safe_get(position1, 'x', ''),
-            'y1': _safe_get(position1, 'y', ''),
-            'z1': _safe_get(position1, 'z', ''),
-            'quality1': _safe_get(position1, 'quality', ''),
-            'x2': _safe_get(position2, 'x', ''),
-            'y2': _safe_get(position2, 'y', ''),
-            'z2': _safe_get(position2, 'z', ''),
-            'quality2': _safe_get(position2, 'quality', ''),
+            'tag_id': tag_id,
+            'x': _safe_get(position, 'x', ''),
+            'y': _safe_get(position, 'y', ''),
+            'z': _safe_get(position, 'z', ''),
+            'quality': _safe_get(position, 'quality', ''),
         }
         
         # Try to get the file handle and writer from the manager; if not available, fallback to opening the file each time
