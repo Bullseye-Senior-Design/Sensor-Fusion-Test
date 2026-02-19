@@ -6,6 +6,10 @@ from Robot.subsystems.KalmanStateEstimator import KalmanStateEstimator
 from Robot.subsystems.MotorControl import MotorControl
 import logging
 from Robot.Constants import Constants
+from pathlib import Path
+from Robot.Commands.log_data.csvlib import CSVFileManager
+from Robot.Commands.log_data.csvlib import write_csv_or_fallback
+
 
 logger = logging.getLogger(f"{__name__}.FollowPathCmd")
 logger.setLevel(logging.INFO)  # Set to DEBUG for detailed output
@@ -62,6 +66,9 @@ class FollowPathCmd(Command):
         logger.info(f"Path Following - Start Position: x={start_pos[0]:.3f}m, y={start_pos[1]:.3f}m, yaw={np.degrees(start_pos[2]):.1f}°")
         logger.info(f"Path Following - Target Position: x={target_pos[0]:.3f}m, y={target_pos[1]:.3f}m, yaw={np.degrees(target_pos[2]):.1f}°")
         
+        # Save reference path to CSV
+        self._save_reference_path()
+        
         self.path_following.start_path_following()
         
         self._last_update_time = time.time()
@@ -102,6 +109,37 @@ class FollowPathCmd(Command):
             print("FollowPathCmd: interrupted")
         else:
             print("FollowPathCmd: completed")
+    
+    def _save_reference_path(self):
+        """Save the reference path to a CSV file in the references folder."""
+        # Create references folder if it doesn't exist
+        references_dir = Path.cwd() / 'references'
+        references_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Generate timestamped filename
+        ts_str = time.strftime('%Y%m%d_%H%M%S', time.localtime())
+        reference_file = references_dir / f'reference_{ts_str}.csv'
+        
+        # Setup CSV manager and write path data
+        try:
+            csv_manager = CSVFileManager()
+            fieldnames = ['x', 'y', 'yaw']
+            csv_manager.setup_file(str(reference_file), fieldnames)
+            
+            # Write each row of the path
+            for row_data in self.path_matrix:
+                row = {
+                    'x': row_data[0],
+                    'y': row_data[1],
+                    'yaw': row_data[2],
+                }
+                fh, writer, _ = csv_manager.files.get(str(reference_file), (None, None, None))
+                write_csv_or_fallback(writer, fh, str(reference_file), fieldnames, row)
+            
+            csv_manager.close_all()
+            logger.info(f"Reference path saved to: {reference_file}")
+        except Exception as e:
+            logger.error(f"Failed to save reference path: {e}")
 
     def is_finished(self):
         """Command runs until cancelled."""

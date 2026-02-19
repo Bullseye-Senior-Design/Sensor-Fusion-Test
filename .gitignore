@@ -5,6 +5,7 @@ __pycache__/
 
 logs/
 sim_log/
+references/
 
 # C extensions
 *.so
