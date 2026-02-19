@@ -45,11 +45,6 @@ class Position:
         return self.x == other.x and self.y == other.y and self.z == other.z and self.id == other.id
 
 @dataclass
-class TagInfo:
-    node_id: str
-    anchors: Optional[List[Dict[str, Any]]] = None
-
-@dataclass
 class LocationData:
     anchors: Optional[List[Dict[str, Any]]]
     position: Optional[Position]
@@ -77,7 +72,6 @@ class UWBTag:
         self.serial_connection: Optional[serial.Serial] = None
         self.is_connected = False
         self.is_reading = False
-        self.tag_info = TagInfo(node_id="unknown")
         self.read_thread = None
         self.state_estimator = KalmanStateEstimator()
         
@@ -209,12 +203,12 @@ class UWBTag:
         self.is_reading = True
         
         def read_loop():
-            logger.info("Starting high-speed position polling...")
+            logger.info(f"Starting high-speed position polling for tag {self.id}...")
             last_log_time = time.time()
             
             while self.is_reading:
                 
-                logger.debug(f"Time since last log: {time.time() - last_log_time:.2f}s")
+                logger.debug(f"Time since last log for tag {self.id}: {time.time() - last_log_time:.2f}s")
                 last_log_time = time.time()
                 
                 # 1. Get Data (Blocking call via serial, but fast)
@@ -227,7 +221,7 @@ class UWBTag:
                         # 2. Check if data is STALE (Duplicate)
                         # We compare X, Y, Z. If they are identical to the last read,
                         # the tag has not updated its calculation yet.
-                        logger.debug(f"Comparing positions: Last={self.last_position} vs New={loc_data.position}")
+                        logger.debug(f"Comparing positions for tag {self.id}: Last={self.last_position} vs New={loc_data.position}")
                         if (self.last_position is None) or (loc_data.position != self.last_position):
                             self.last_position = loc_data.position
                             process_update = True
@@ -245,7 +239,7 @@ class UWBTag:
                             else:
                                 self.state_estimator.update_uwb_range(meas, use_offset= False)
                         except Exception as e:
-                            logger.error(f"EKF Update Error: {e}")
+                            logger.error(f"EKF Update Error for tag {self.id}: {e}")
                             
                 # 5. NO SLEEP. 
                 # We loop immediately to catch the next UART byte as soon as it arrives.
