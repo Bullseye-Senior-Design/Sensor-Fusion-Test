@@ -39,8 +39,6 @@ class RobotContainer:
         ZeroIMUCmd(self.motor_control, self.path_following).schedule()
         PlotStateCmd().schedule()
         
-        
-        
         # AlignIMUToWorldCmd(tau=0.5, duration=30.0).schedule()
                 
     def shutdown(self):
