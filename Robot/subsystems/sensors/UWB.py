@@ -144,7 +144,7 @@ class UWB:
         if hasattr(self, '_boot_stop_event') and self._boot_stop_event:
             self._boot_stop_event.set()
 
-    def stop_all(self) -> None:
+    def close_all(self) -> None:
         """Stop reading and disconnect all tags."""
         for tag in self.tags:
             try:

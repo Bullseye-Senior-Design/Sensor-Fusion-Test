@@ -3,7 +3,8 @@ from structure.commands.Command import Command
 from Robot.subsystems.sensors.IMU import IMU
 import numpy as np
 from Robot.Commands.FollowPathCmd import FollowPathCmd
-from Robot.subsystems.MotorControl import MotorControl
+from Robot.subsystems.DriveTrain import DriveTrain
+
 from Robot.subsystems.PathFollowing import PathFollowing
 
 
@@ -19,13 +20,13 @@ class ZeroIMUCmd(Command):
     """
 
     def __init__(self,
-                 motor_control: MotorControl,
+                 drive_train: DriveTrain,
                  path_following: PathFollowing,
                  schedule_followup: bool = True, 
                  sample_count: int = 10):
         super().__init__()
         self._imu = IMU()
-        self.motor_control = motor_control
+        self.drive_train = drive_train
         self.path_following = path_following
         self.schedule_followup = schedule_followup
         
@@ -84,7 +85,7 @@ class ZeroIMUCmd(Command):
         if interrupted and not self._applied:
             print("ZeroIMUCmd: interrupted before applying yaw offset")
         if self.schedule_followup:
-            FollowPathCmd(self.motor_control, self.path_following).schedule()
+            FollowPathCmd(self.drive_train, self.path_following).schedule()
 
     def is_finished(self):
         return self._applied

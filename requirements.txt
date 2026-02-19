@@ -5,3 +5,4 @@ adafruit-circuitpython-bno055
 matplotlib
 casadi
 smbus
+spidev

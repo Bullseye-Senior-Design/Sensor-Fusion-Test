@@ -393,6 +393,6 @@ class IMU():
 
         # avoid busy loop
         time.sleep(self.interval)
-             
+                     
     def end(self):
         pass

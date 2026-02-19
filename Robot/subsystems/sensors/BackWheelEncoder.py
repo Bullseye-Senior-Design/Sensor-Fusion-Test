@@ -4,6 +4,7 @@ import time
 import threading
 from datetime import datetime
 import logging
+from Robot.Constants import Constants
 from Robot.subsystems.KalmanStateEstimator import KalmanStateEstimator
 
 logger = logging.getLogger(f"{__name__}.BackWheelEncoder")
@@ -23,8 +24,7 @@ class BackWheelEncoder:
             cls._instance = super().__new__(cls)
         return cls._instance
     
-    def start(self, pin: int, active_high: bool = True, pull_up: bool = True, debounce_ms: int = 100,
-                 edge: str = 'rising', wheel_circumference: float = 0.5, counts_per_revolution: int = 6):
+    def start(self):
         """Create a proximity sensor reader.
 
         Args:
@@ -34,11 +34,11 @@ class BackWheelEncoder:
             debounce_ms: Debounce time in milliseconds
             edge: 'rising', 'falling', or 'both' (which edge to detect)
         """
-        self.pin = pin
-        self.active_high = active_high
-        self.pull_up = pull_up
-        self.debounce_ms = debounce_ms
-        self.edge = edge.lower()
+        self.pin = Constants.back_right_encoder_pin
+        self.active_high = True
+        self.pull_up = True
+        self.debounce_ms = 100
+        self.edge = 'rising'
 
         self.interval = 1  # update interval in seconds
         self._running = False
@@ -51,9 +51,9 @@ class BackWheelEncoder:
         logger.debug("edge {edge}, debounce {debounce}ms".format(edge=self.edge, debounce=self.debounce_ms))
         
         # Wheel parameters
-        self.wheel_circumference = wheel_circumference  # meters (adjust to your wheel)
-        self.counts_per_revolution = counts_per_revolution  # encoder pulses per wheel rotation
-        
+        self.wheel_circumference = Constants.wheel_circumference  # meters (adjust to your wheel)
+        self.counts_per_revolution = Constants.counts_per_revolution  # encoder pulses per wheel rotation
+
         self.run()
 
     def _gpio_callback(self, channel):
@@ -115,7 +115,7 @@ class BackWheelEncoder:
         
         time.sleep(self.interval)
 
-    def stop(self):
+    def close(self):
         """Stop monitoring and cleanup"""
         self._running = False
 

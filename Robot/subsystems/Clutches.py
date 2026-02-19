@@ -4,16 +4,6 @@ from structure.Subsystem import Subsystem
 
 class Clutches(Subsystem):
     
-    _instance = None
-    
-    # When a new instance is created, sets it to the same global instance
-    def __new__(cls):
-        # If the instance is None, create a new instance
-        # Otherwise, return already created instance
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
-    
     def start(self, left_clutch_pin: int, right_clutch_pin: int):
         """Initialize clutch control GPIO pins and state."""
         # GPIO pin setup code here
@@ -39,7 +29,7 @@ class Clutches(Subsystem):
         """Disengage the right clutch."""
         GPIO.output(self.right_clutch_pin, GPIO.LOW)
         
-    def stop(self):
+    def close(self):
         """Cleanup GPIO pins."""
         if GPIO is not None:
             # Don't call GPIO.cleanup() globally to avoid affecting other users; only cleanup pin
