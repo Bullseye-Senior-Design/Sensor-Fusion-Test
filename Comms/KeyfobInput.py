@@ -1,11 +1,11 @@
 from dataclasses import dataclass
 @dataclass 
 class KeyfobInput:
-    Btn_1: bool
-    Btn_2: bool
-    Btn_3: bool
-    Btn_4: bool
-    Btn_5: bool
-    Btn_6: bool
-    Btn_7: bool
-    Btn_8: bool
+    btn_1: bool
+    btn_2: bool
+    btn_3: bool
+    btn_4: bool
+    btn_5: bool
+    btn_6: bool
+    btn_7: bool
+    btn_8: bool

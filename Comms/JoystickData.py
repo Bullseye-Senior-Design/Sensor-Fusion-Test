@@ -5,19 +5,19 @@ class JoystickData:
     left_y: float
     right_x: float
     right_y: float
-    Dpad_up: bool
-    Dpad_down: bool
-    Dpad_left: bool
-    Dpad_right: bool
-    Btn_A: bool
-    Btn_B: bool
-    Btn_X: bool
-    Btn_Y: bool
-    Btn_LB: bool
-    Btn_RB: bool
-    Btn_LS: bool
-    Btn_RS: bool
-    Btn_R2: bool
-    Btn_L2: bool
-    Btn_Share: bool
-    Btn_Options: bool
+    dpad_up: bool
+    dpad_down: bool
+    dpad_left: bool
+    dpad_right: bool
+    btn_A: bool
+    btn_B: bool
+    btn_X: bool
+    btn_Y: bool
+    btn_LB: bool
+    btn_RB: bool
+    btn_LS: bool
+    btn_RS: bool
+    btn_R2: bool
+    btn_L2: bool
+    btn_share: bool
+    btn_options: bool
