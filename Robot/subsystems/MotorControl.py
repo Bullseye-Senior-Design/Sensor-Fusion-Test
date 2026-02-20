@@ -62,7 +62,8 @@ class MotorControl(Subsystem):
         
         # Clamp to int16 range
         speed = max(-32768, min(32767, int(speed)))
-        angle = max(-32768, min(32767, int(angle)))
+        # flip angle sign to match expected convention (positive angle = left turn)
+        angle = -max(-32768, min(32767, int(angle)))
         
         self._speed = speed
         self._angle = angle
