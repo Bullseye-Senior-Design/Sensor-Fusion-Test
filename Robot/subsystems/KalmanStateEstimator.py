@@ -19,8 +19,12 @@ from dataclasses import dataclass
 from typing import Tuple
 from Robot.MathUtil import MathUtil
 import time
+import logging
 
 GRAVITY = np.array([0.0, 0.0, -9.80665])
+
+logger = logging.getLogger(__name__ + ".KalmanStateEstimator")
+logger.setLevel(logging.DEBUG)  # Set to DEBUG for detailed output
 
 @dataclass
 class State:
@@ -63,9 +67,9 @@ class KalmanStateEstimator:
         self.P[6:9, 6:9] = P_att
 
         # Process noise (continuous) in error-state (9x9)
-        q_pos = 1e-2
-        q_vel = 1e-1
-        q_att = 1e-1
+        q_pos = 1e-3
+        q_vel = 1e-4
+        q_att = 1e-3
         self.Qc = block_diag(np.eye(3) * q_pos, np.eye(3) * q_vel, np.eye(3) * q_att)
 
         # Measurement noise templates
@@ -461,25 +465,33 @@ class KalmanStateEstimator:
                 use_offset
             )
             
+            print(f"[UWB Batch] Tag {tag_id} received: pos={tag_pos_meas}, batch_size={len(self._uwb_batch)}")
+            
             # Check if we should process the batch
             should_process = False
             
             if len(self._uwb_batch) >= 2:
                 # We have measurements from at least 2 tags - process immediately
                 should_process = True
+                print(f"[UWB Batch] Trigger: multiple tags ({len(self._uwb_batch)} tags)")
             elif len(self._uwb_batch) == 1:
                 # Only one measurement - check if we should wait or timeout
                 # Don't wait here, just return and let the next call trigger processing
                 # Check age of oldest measurement
                 oldest_time = min(t for t, _, _, _ in self._uwb_batch.values())
+                age_ms = (current_time - oldest_time) * 1000
                 if current_time - oldest_time >= self._uwb_batch_timeout:
                     should_process = True
+                    print(f"[UWB Batch] Trigger: timeout ({age_ms:.1f}ms >= {self._uwb_batch_timeout*1000:.1f}ms)")
+                else:
+                    print(f"[UWB Batch] Waiting: {age_ms:.1f}ms / {self._uwb_batch_timeout*1000:.1f}ms")
             
             if should_process:
                 # Process all stored measurements as a single stacked update
                 self._process_stacked_uwb_update()
                 # Clear the batch
                 self._uwb_batch.clear()
+                print(f"[UWB Batch] Processed and cleared batch")
     
     def _process_stacked_uwb_update(self):
         """Process stored UWB measurements as a single stacked update.
@@ -489,18 +501,23 @@ class KalmanStateEstimator:
         """
         # This assumes _lock is already held by caller
         if not self._uwb_batch:
+            print(f"[UWB Batch] _process_stacked_uwb_update called but batch is empty")
             return
         
+        print(f"[UWB Batch] Processing {len(self._uwb_batch)} measurements: tags={sorted(self._uwb_batch.keys())}")
+        
         # Check for any valid measurement to initialize
-        for _, (_, pos, _, _) in self._uwb_batch.items():
+        for tag_id, (_, pos, _, _) in self._uwb_batch.items():
             if not self.is_initialized:
                 if np.all(np.isfinite(pos)):
                     self.x[0:3] = pos  # Set initial position
                     self.is_initialized = True
+                    print(f"[UWB Batch] Initialized filter with tag {tag_id} at pos={pos}")
                     return
         
         # Don't update if still not initialized
         if not self.is_initialized:
+            print(f"[UWB Batch] Skipping update: filter not initialized")
             return
         
         # Get current rotation matrix (shared for all tags)
@@ -522,6 +539,7 @@ class KalmanStateEstimator:
             
             # Skip non-finite measurements
             if not np.all(np.isfinite(pos)):
+                print(f"[UWB Batch] Skipping tag {tag_id}: non-finite position")
                 continue
             
             # Decide whether to apply the offset
@@ -536,6 +554,8 @@ class KalmanStateEstimator:
             h = self.pos + R @ o_b
             h_list.append(h)
             
+            print(f"[UWB Batch] Tag {tag_id}: meas={pos}, pred={h}, offset={o_b}, residual={pos-h}")
+            
             # Jacobian H (3x9): [ I3  03  R[o]_x ]
             H = np.zeros((3, 9))
             H[:, 0:3] = np.eye(3)
@@ -545,6 +565,7 @@ class KalmanStateEstimator:
         
         # Check if we have valid measurements
         if not z_list:
+            print(f"[UWB Batch] No valid measurements to process")
             return
         
         # Stack into single vectors/matrices
@@ -554,6 +575,8 @@ class KalmanStateEstimator:
         
         # Innovation
         y = z_stacked - h_stacked
+        
+        print(f"[UWB Batch] Stacked innovation norm: {np.linalg.norm(y):.4f}m, components: {y}")
         
         # Measurement covariance (block diagonal)
         n_meas = len(z_list)
@@ -565,10 +588,13 @@ class KalmanStateEstimator:
         try:
             Sinv = np.linalg.inv(S)
         except np.linalg.LinAlgError:
+            print(f"[UWB Batch] ERROR: Singular innovation covariance matrix")
             return
         
         K = self.P @ H_stacked.T @ Sinv
         dx = (K @ y).flatten()
+        
+        print(f"[UWB Batch] State correction: pos={dx[0:3]}, vel={dx[3:6]}, att={dx[6:9]}")
         
         # Inject error state
         self._inject_error_state(dx)
@@ -576,6 +602,8 @@ class KalmanStateEstimator:
         # Update covariance (Joseph form for numerical stability)
         I = np.eye(9)
         self.P = (I - K @ H_stacked) @ self.P @ (I - K @ H_stacked).T + K @ R_stacked @ K.T
+        
+        print(f"[UWB Batch] Update complete. New position: {self.pos}")
 
     def _inject_error_state(self, dx: np.ndarray):
         """Inject 9-vector error state into the full state x and renormalize quaternion.
